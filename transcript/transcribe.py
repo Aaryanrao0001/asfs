@@ -19,7 +19,8 @@ def transcribe_video(video_path: str, output_dir: str, model_size: str = "base")
     Args:
         video_path: Path to video or audio file
         output_dir: Directory to save transcript JSON
-        model_size: Whisper model size (tiny, base, small, medium, large-v2, large-v3)
+        model_size: Whisper model size (tiny, base, small, medium, large-v1, large-v2, large-v3)
+                    Note: faster-whisper supports all standard Whisper model sizes
         
     Returns:
         Path to transcript JSON file

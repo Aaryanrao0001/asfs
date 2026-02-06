@@ -28,6 +28,9 @@ def extract_audio(video_path: str, output_dir: str) -> str:
     Raises:
         FileNotFoundError: If video doesn't exist
         RuntimeError: If FFmpeg extraction fails
+        
+    Note:
+        If audio.wav already exists in output_dir, it will be overwritten.
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video file not found: {video_path}")
