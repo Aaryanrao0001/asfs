@@ -3,17 +3,21 @@
 Automated Short-Form Content Clipping & Distribution System
 
 Main orchestrator that runs the full pipeline:
-1. Video ingest & normalization
+1. Audio extraction (fast, for transcription)
 2. Transcript generation
 3. Transcript quality validation
 4. Candidate segment building
 5. AI highlight scoring
 6. Clip validation & deduplication
-7. FFmpeg clip extraction
-8. Metadata generation
-9. Scheduling & rate control
-10. Platform uploads
-11. Audit logging
+7. FFmpeg clip extraction from original video
+8. Crop clips to 9:16 (vertical format)
+9. Metadata generation
+10. Scheduling & rate control
+11. Platform uploads
+12. Audit logging
+
+Note: Video normalization removed for MVP performance.
+Aspect ratio conversion happens only on final clips.
 """
 
 import os
@@ -26,8 +30,7 @@ from pathlib import Path
 from typing import Dict, List
 
 # Import pipeline modules
-from ingest import normalize_video
-from transcript import transcribe_video, check_transcript_quality
+from transcript import transcribe_video, check_transcript_quality, extract_audio
 from transcript.transcribe import load_transcript
 from segmenter import build_sentence_windows, build_pause_windows
 from ai import score_segments
@@ -119,35 +122,34 @@ def run_pipeline(video_path: str, output_dir: str = "output"):
     os.makedirs(clips_dir, exist_ok=True)
     
     try:
-        # Stage 1: Video Normalization
+        # Stage 1: Audio Extraction (fast)
         logger.info("\n" + "=" * 80)
-        logger.info("STAGE 1: VIDEO NORMALIZATION")
+        logger.info("STAGE 1: AUDIO EXTRACTION")
         logger.info("=" * 80)
-        audit.log_pipeline_event("normalization", "started", video_path)
+        audit.log_pipeline_event("audio_extraction", "started", video_path)
         
         try:
-            normalized_video = normalize_video(video_path, work_dir)
-            logger.info(f"✓ Normalized video: {normalized_video}")
-            audit.log_pipeline_event("normalization", "completed", video_path, 
-                                    {"output": normalized_video})
+            audio_path = extract_audio(video_path, work_dir)
+            logger.info(f"✓ Audio extracted: {audio_path}")
+            audit.log_pipeline_event("audio_extraction", "completed", audio_path)
         except Exception as e:
-            logger.error(f"✗ Normalization failed: {str(e)}")
-            audit.log_pipeline_event("normalization", "failed", video_path, 
+            logger.error(f"✗ Audio extraction failed: {str(e)}")
+            audit.log_pipeline_event("audio_extraction", "failed", video_path, 
                                     error_message=str(e))
             raise
         
-        # Stage 2: Transcript Generation
+        # Stage 2: Transcript Generation (uses audio, not video)
         logger.info("\n" + "=" * 80)
         logger.info("STAGE 2: TRANSCRIPT GENERATION")
         logger.info("=" * 80)
-        audit.log_pipeline_event("transcription", "started", video_path)
+        audit.log_pipeline_event("transcription", "started", audio_path)
         
         try:
-            transcript_path = transcribe_video(normalized_video, work_dir)
+            transcript_path = transcribe_video(audio_path, work_dir)
             logger.info(f"✓ Transcript saved: {transcript_path}")
             
             transcript_data = load_transcript(transcript_path)
-            audit.log_pipeline_event("transcription", "completed", video_path,
+            audit.log_pipeline_event("transcription", "completed", audio_path,
                                     {"segments": len(transcript_data.get("segments", []))})
         except Exception as e:
             logger.error(f"✗ Transcription failed: {str(e)}")
@@ -281,7 +283,7 @@ def run_pipeline(video_path: str, output_dir: str = "output"):
         audit.log_pipeline_event("extraction", "started", video_path)
         
         try:
-            extracted_clips = extract_clips(normalized_video, unique_clips, clips_dir)
+            extracted_clips = extract_clips(video_path, unique_clips, clips_dir)
             logger.info(f"✓ Extracted clips: {len(extracted_clips)}")
             
             # Log each clip

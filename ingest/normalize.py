@@ -1,3 +1,4 @@
+# Not used in MVP - kept for future conditional normalization
 """Video normalization using FFmpeg."""
 
 import subprocess
