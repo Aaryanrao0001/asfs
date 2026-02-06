@@ -191,9 +191,13 @@ python main.py /path/to/video.mp4 -v
 ## 📊 Pipeline Stages
 
 ### 1. Video Normalization
-- Standardizes video to 1080x1920 (vertical)
-- Converts to 30fps, H.264, AAC
+- Normalizes codec to H.264
+- Converts to 30fps
+- Standardizes audio to AAC 44100Hz stereo
+- Preserves original aspect ratio (no cropping)
 - Ensures platform compatibility
+
+**Note:** Aspect ratio conversion is deferred to clip extraction stage for better performance.
 
 ### 2. Transcript Generation
 - Uses OpenAI Whisper for speech-to-text
@@ -234,8 +238,11 @@ python main.py /path/to/video.mp4 -v
 ### 7. Clip Extraction
 - FFmpeg-based precise extraction
 - Re-encodes for platform compatibility
-- Applies vertical format (1080x1920)
+- Applies vertical format (1080x1920) to selected clips only
 - Generates individual MP4 files
+
+**Performance:** By cropping only selected clips (instead of the entire video during normalization), 
+processing time is significantly reduced, especially for long videos.
 
 ### 8. Metadata Generation
 - **Captions:** Platform-specific, with CTAs
