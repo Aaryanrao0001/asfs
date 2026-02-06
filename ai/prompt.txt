@@ -111,7 +111,7 @@ SCORING RULE:
 
 ---
 
-## 4. RELATABILITY (0-10) — WEIGHT: 10%
+## 4. RELATABILITY (0-10) — WEIGHT: 5%
 
 Personal relevance > expertise.
 
@@ -135,7 +135,7 @@ SCORING RULE:
 
 ---
 
-## 5. COMPLETION PROBABILITY (0-10) — WEIGHT: 15%
+## 5. COMPLETION PROBABILITY (0-10) — WEIGHT: 10%
 
 Platforms reward finish rate over watch time.
 
@@ -164,7 +164,7 @@ SCORING RULE:
 
 ---
 
-## 6. PLATFORM FITNESS (0-10) — WEIGHT: 10%
+## 6. PLATFORM FITNESS (0-10) — WEIGHT: 5%
 
 Does this feel native to short-form?
 
@@ -199,10 +199,10 @@ FINAL_SCORE = (
   hook_score × 0.35 +
   retention_score × 0.25 +
   emotion_score × 0.20 +
-  completion_score × 0.15 +
-  platform_fit_score × 0.10 +
-  relatability_score × 0.10
-) / 10 × 100
+  completion_score × 0.10 +
+  relatability_score × 0.05 +
+  platform_fit_score × 0.05
+) × 10
 
 Round to integer (0-100).
 
