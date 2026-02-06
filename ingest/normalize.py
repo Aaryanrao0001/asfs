@@ -10,13 +10,16 @@ logger = logging.getLogger(__name__)
 
 def normalize_video(input_path: str, output_dir: str) -> str:
     """
-    Normalize video to standard format for platform compatibility.
+    Normalize video to standard codec/audio format while preserving aspect ratio.
     
     Target specs:
-    - Resolution: 1080x1920 (vertical)
     - Frame rate: 30 fps
-    - Audio: 44100Hz stereo
+    - Audio: 44100Hz stereo AAC
     - Codec: H.264 + AAC
+    - Aspect ratio: Preserved from original (no cropping at this stage)
+    
+    Note: Aspect ratio conversion (e.g., to 9:16 vertical) is applied during
+    clip extraction to avoid redundant processing of the entire video.
     
     Args:
         input_path: Path to input video file
@@ -40,19 +43,21 @@ def normalize_video(input_path: str, output_dir: str) -> str:
     
     # FFmpeg command for normalization
     # -i: input file
-    # -vf scale: resize and pad to 1080x1920 maintaining aspect ratio
-    # -r: frame rate
-    # -ar: audio sample rate
+    # -r: frame rate (30fps)
+    # -ar: audio sample rate (44100Hz)
     # -ac: audio channels (stereo)
-    # -c:v: video codec
-    # -c:a: audio codec
+    # -c:v: video codec (H.264)
+    # -c:a: audio codec (AAC)
     # -preset: encoding speed/quality tradeoff
     # -crf: quality (lower = better, 23 is default)
+    # -movflags: optimize for streaming/web playback
     # -y: overwrite output file
+    # 
+    # Note: No -vf filter to preserve original aspect ratio
+    # Aspect ratio conversion happens during clip extraction
     cmd = [
         'ffmpeg',
         '-i', input_path,
-        '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
         '-r', '30',
         '-ar', '44100',
         '-ac', '2',

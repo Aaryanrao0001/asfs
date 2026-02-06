@@ -16,6 +16,11 @@ def extract_clips(
     """
     Extract video clips using FFmpeg with platform-optimized settings.
     
+    This function extracts clips from the source video and applies 9:16 aspect
+    ratio conversion. By applying the crop here (instead of during normalization),
+    we only process selected clips rather than the entire source video, which
+    significantly improves performance for long videos.
+    
     Args:
         video_path: Path to source video file
         clips: List of clip dictionaries with start, end, and metadata
@@ -47,7 +52,8 @@ def extract_clips(
         # FFmpeg command for clip extraction
         # -ss before -i for faster seeking
         # Always re-encode for platform compatibility
-        # Ensure vertical format (1080x1920)
+        # Apply 9:16 vertical crop here (after segment selection)
+        # This is more efficient than cropping the entire video during normalization
         cmd = [
             'ffmpeg',
             '-ss', str(start_time),
