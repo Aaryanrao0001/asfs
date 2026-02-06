@@ -209,35 +209,72 @@ CRITICAL: You MUST respond with ONLY valid JSON.
             except ValueError as e:
                 logger.error(f"Failed to parse AI response as JSON: {e}")
                 logger.error(f"Response was: {ai_response[:200]}")
-                # Create default analysis
+                # Create default analysis (new format)
                 ai_analysis = {
-                    "scores": {
-                        "hook_strength": 5,
-                        "emotional_resonance": 5,
-                        "clarity": 5,
-                        "virality_potential": 5,
-                        "platform_fit": 5
-                    },
-                    "overall_score": 5.0,
-                    "recommendation": "AVERAGE",
-                    "caption": segment["text"][:100],
-                    "hashtags": ["#viral", "#shorts"],
-                    "best_platforms": ["TikTok", "Instagram", "YouTube"],
-                    "reasoning": "AI analysis failed, using default scores"
+                    "hook_score": 5,
+                    "retention_score": 5,
+                    "emotion_score": 5,
+                    "relatability_score": 5,
+                    "completion_score": 5,
+                    "platform_fit_score": 5,
+                    "final_score": 50,
+                    "verdict": "skip",
+                    "key_strengths": ["AI analysis failed"],
+                    "key_weaknesses": ["Unable to parse response"],
+                    "first_3_seconds": segment["text"][:100],
+                    "primary_emotion": "neutral",
+                    "optimal_platform": "none"
                 }
             
-            # Combine segment data with AI analysis
-            scored_segment = {
-                **segment,
-                "ai_analysis": ai_analysis,
-                "overall_score": ai_analysis.get("overall_score", 5.0)
-            }
+            # Map new format to existing structure for backward compatibility
+            # Check if using new format (direct keys) or old format (nested)
+            if "hook_score" in ai_analysis:
+                # New viral evaluation format
+                final_score = ai_analysis.get("final_score", 0)
+                verdict = ai_analysis.get("verdict", "skip")
+                
+                # Convert final_score (0-100) to overall_score (0-10) for compatibility
+                overall_score = final_score / 10.0
+                
+                scored_segment = {
+                    **segment,
+                    "ai_analysis": ai_analysis,
+                    "overall_score": overall_score,
+                    "hook_score": ai_analysis.get("hook_score", 0),
+                    "retention_score": ai_analysis.get("retention_score", 0),
+                    "emotion_score": ai_analysis.get("emotion_score", 0),
+                    "relatability_score": ai_analysis.get("relatability_score", 0),
+                    "completion_score": ai_analysis.get("completion_score", 0),
+                    "platform_fit_score": ai_analysis.get("platform_fit_score", 0),
+                    "final_score": final_score,
+                    "verdict": verdict,
+                    "key_strengths": ai_analysis.get("key_strengths", []),
+                    "key_weaknesses": ai_analysis.get("key_weaknesses", []),
+                    "first_3_seconds": ai_analysis.get("first_3_seconds", ""),
+                    "primary_emotion": ai_analysis.get("primary_emotion", "neutral"),
+                    "optimal_platform": ai_analysis.get("optimal_platform", "none")
+                }
+                
+                logger.info(f"Scored segment {idx + 1}/{len(segments_to_score)}: "
+                           f"{final_score}/100 ({verdict.upper()})")
+            else:
+                # Old format fallback (nested scores)
+                scores = ai_analysis.get("scores", {})
+                overall_score = ai_analysis.get("overall_score", 5.0)
+                
+                scored_segment = {
+                    **segment,
+                    "ai_analysis": ai_analysis,
+                    "overall_score": overall_score,
+                    "scores": scores,
+                    "recommendation": ai_analysis.get("recommendation", "AVERAGE")
+                }
+                
+                logger.info(f"Scored segment {idx + 1}/{len(segments_to_score)}: "
+                           f"{overall_score:.1f}/10 "
+                           f"({ai_analysis.get('recommendation', 'UNKNOWN')})")
             
             scored_segments.append(scored_segment)
-            
-            logger.info(f"Scored segment {idx + 1}/{len(segments_to_score)}: "
-                       f"{ai_analysis.get('overall_score', 0):.1f}/10 "
-                       f"({ai_analysis.get('recommendation', 'UNKNOWN')})")
             
         except Exception as e:
             logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
