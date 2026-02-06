@@ -206,11 +206,11 @@ FINAL_SCORE = (
 
 Round to integer (0-100).
 
-CRITICAL OVERRIDE RULES:
-- If hook_score < 4 → FINAL_SCORE capped at 50
-- If emotion_score < 3 → FINAL_SCORE capped at 60
-- If duration > 60s → FINAL_SCORE -20 penalty
-- If starts with greeting → FINAL_SCORE capped at 40
+CRITICAL OVERRIDE RULES (apply AFTER calculation):
+- If hook_score < 4 → cap FINAL_SCORE at 50
+- If emotion_score < 3 → cap FINAL_SCORE at 60
+- If duration > 60s → subtract 20 from FINAL_SCORE
+- If starts with greeting → cap FINAL_SCORE at 40
 
 VERDICT THRESHOLDS:
 - 75-100: "viral"
