@@ -49,38 +49,70 @@ def upload_to_instagram(
         # Instagram Graph API base URL
         base_url = f"https://graph.instagram.com/v18.0/{ig_user_id}"
         
-        # Step 1: Upload video to hosting (Instagram requires publicly accessible URL)
-        # For production, video must be hosted on a publicly accessible server
-        # This is a limitation of Instagram Graph API
+        # Instagram Graph API requires video to be hosted on publicly accessible URL
+        # This is a limitation of the Instagram API - videos must be accessible via HTTP(S)
+        video_url = credentials.get("video_url")
         
-        # Since we can't host files in this implementation,
-        # we'll demonstrate the API flow with placeholder
+        if not video_url:
+            logger.warning("Instagram upload requires video to be hosted on a publicly accessible URL")
+            logger.warning("For production deployment:")
+            logger.warning("  1. Upload video file to CDN (AWS S3, Cloudflare, etc.)")
+            logger.warning("  2. Provide the public URL in credentials['video_url']")
+            logger.warning("  3. Re-run upload with the hosted URL")
+            logger.info("Skipping Instagram upload - video not hosted")
+            return None
         
-        logger.warning("Instagram upload requires video to be hosted on publicly accessible URL")
-        logger.warning("For production: upload video to CDN/S3 first, then use that URL")
-        
-        # Example API call structure (would work with hosted video):
         # Step 1: Create media container
         container_endpoint = f"{base_url}/media"
         
-        # For demonstration, we'll show the expected API structure
         container_params = {
             "access_token": access_token,
             "media_type": "REELS",
-            # "video_url": "https://your-cdn.com/video.mp4",  # Would be the hosted URL
+            "video_url": video_url,
             "caption": full_caption[:2200],  # Instagram caption limit
             "share_to_feed": True
         }
         
-        logger.info("Instagram upload requires hosted video URL - skipping actual upload")
-        logger.info("API structure validated, would proceed with:")
-        logger.info(f"  1. POST {container_endpoint} to create container")
-        logger.info(f"  2. GET container status until ready")
-        logger.info(f"  3. POST {base_url}/media_publish to publish")
+        logger.info("Creating Instagram media container")
+        response = requests.post(container_endpoint, params=container_params)
         
-        # Return placeholder ID to indicate setup is correct
-        # In production, this would be replaced with actual API calls
-        return "instagram_placeholder_id"
+        if response.status_code != 200:
+            logger.error(f"Failed to create container: {response.status_code} {response.text}")
+            return None
+        
+        container_data = response.json()
+        container_id = container_data.get("id")
+        
+        if not container_id:
+            logger.error("No container ID received from Instagram")
+            return None
+        
+        logger.info(f"Media container created: {container_id}")
+        
+        # Step 2: Wait for container to be ready
+        if not check_instagram_container_status(container_id, access_token):
+            logger.error("Container processing failed or timed out")
+            return None
+        
+        # Step 3: Publish the media
+        publish_endpoint = f"{base_url}/media_publish"
+        publish_params = {
+            "access_token": access_token,
+            "creation_id": container_id
+        }
+        
+        logger.info("Publishing Instagram Reel")
+        publish_response = requests.post(publish_endpoint, params=publish_params)
+        
+        if publish_response.status_code != 200:
+            logger.error(f"Failed to publish: {publish_response.status_code} {publish_response.text}")
+            return None
+        
+        publish_data = publish_response.json()
+        media_id = publish_data.get("id")
+        
+        logger.info(f"Instagram Reel published: {media_id}")
+        return media_id
         
     except ImportError:
         logger.error("requests library not available")
