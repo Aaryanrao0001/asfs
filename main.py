@@ -43,7 +43,7 @@ from typing import Dict, List
 
 # Import pipeline modules
 from transcript import transcribe_video, check_transcript_quality, extract_audio
-from transcript.transcribe import load_transcript
+from transcript.transcribe import load_transcript, load_and_validate_transcript
 from segmenter import build_sentence_windows, build_pause_windows
 from ai import score_segments
 from validator import deduplicate_clips, remove_overlapping_clips
@@ -219,33 +219,26 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                 transcript_data = load_transcript(transcript_path)
                 cache_hit = True
         elif use_cache and os.path.exists(transcript_path):
-            # Transcript exists but not in cache - try to load and validate it
-            try:
-                transcript_data = load_transcript(transcript_path)
+            # Transcript exists but not in cache - load and validate it
+            is_valid, transcript_data = load_and_validate_transcript(transcript_path)
+            
+            if is_valid:
+                # Valid transcript - use it
+                logger.info(f"[OK] SKIPPED (using cached transcript): {transcript_path}")
+                logger.info(f"[OK] Cached transcript has {len(transcript_data['segments'])} segments")
+                audit.log_pipeline_event("transcription", "skipped_cached", transcript_path)
+                cache_hit = True
                 
-                # Validate the loaded transcript
-                if (transcript_data.get("segments") and 
-                    len(transcript_data["segments"]) > 0 and
-                    all("text" in seg and "start" in seg and "end" in seg 
-                        for seg in transcript_data["segments"][:5])):
-                    # Valid transcript - use it
-                    logger.info(f"[OK] SKIPPED (using cached transcript): {transcript_path}")
-                    logger.info(f"[OK] Cached transcript has {len(transcript_data['segments'])} segments")
-                    audit.log_pipeline_event("transcription", "skipped_cached", transcript_path)
-                    cache_hit = True
-                    
-                    # Update cache with this transcript
-                    if use_cache:
-                        pipeline_state['transcription'] = {
-                            'completed': True,
-                            'transcript_path': transcript_path,
-                            'segment_count': len(transcript_data.get("segments", []))
-                        }
-                        cache.save_state(video_path, pipeline_state, 'transcription')
-                else:
-                    raise ValueError("Cached transcript is empty or invalid")
-            except Exception as e:
-                logger.warning(f"Cached transcript invalid or corrupt: {e}")
+                # Update cache with this transcript
+                if use_cache:
+                    pipeline_state['transcription'] = {
+                        'completed': True,
+                        'transcript_path': transcript_path,
+                        'segment_count': len(transcript_data.get("segments", []))
+                    }
+                    cache.save_state(video_path, pipeline_state, 'transcription')
+            else:
+                logger.warning("Cached transcript invalid or corrupt")
                 logger.info("Re-generating transcript...")
                 cache_hit = False
         else:

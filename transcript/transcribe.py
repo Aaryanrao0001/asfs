@@ -101,8 +101,8 @@ def transcribe_video(video_path: str, output_dir: str, model_size: str = "base")
             transcript_data["segments"].append(segment_data)
             segment_count += 1
             
-            # Add progress logging every 100 segments  
-            if segment_count % 100 == 0 and segment_count > 0:
+            # Add progress logging every 100 segments
+            if segment_count % 100 == 0:
                 logger.info(f"Progress: {segment_count} segments processed...")
         
         # Save transcript to JSON
@@ -173,3 +173,41 @@ def validate_transcript(transcript_path: str) -> bool:
     except Exception as e:
         logger.debug(f"Transcript validation failed: {e}")
         return False
+
+
+def load_and_validate_transcript(transcript_path: str) -> tuple:
+    """
+    Load and validate transcript in a single operation.
+    
+    Args:
+        transcript_path: Path to transcript.json
+        
+    Returns:
+        Tuple of (is_valid: bool, data: Dict or None)
+        If valid, returns (True, transcript_data)
+        If invalid, returns (False, None)
+    """
+    try:
+        if not os.path.exists(transcript_path):
+            return False, None
+        
+        with open(transcript_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Check required fields
+        if "segments" not in data or not isinstance(data["segments"], list):
+            return False, None
+        
+        if len(data["segments"]) == 0:
+            return False, None
+        
+        # Check if segments have required fields
+        for seg in data["segments"][:5]:  # Check first 5 segments
+            if "text" not in seg or "start" not in seg or "end" not in seg:
+                return False, None
+        
+        return True, data
+        
+    except Exception as e:
+        logger.debug(f"Transcript validation failed: {e}")
+        return False, None
