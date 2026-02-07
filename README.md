@@ -1,18 +1,233 @@
-# 🎬 Automated Short-Form Content Clipping & Distribution System
+# 🎬 ASFS - Automated Short-Form Content System
 
-A **fully automated, production-ready system** that transforms long-form videos into viral-worthy short clips optimized for TikTok, Instagram Reels, and YouTube Shorts.
+A **fully automated desktop application** that transforms long-form videos into viral-worthy short clips optimized for TikTok, Instagram Reels, and YouTube Shorts.
+
+## ✨ What's New in v2.0
+
+**🖥️ Desktop UI Application**
+- Modern PySide6 (Qt) graphical interface with dark theme
+- Browser-based uploads (no API tokens required!)
+- Built-in Ollama LLM controls
+- Real-time pipeline monitoring
+- Single `.exe` distribution (Windows-first)
+
+**🌐 Browser Automation**
+- Upload via Brave browser automation (Playwright)
+- Reuse existing browser sessions (stay logged in!)
+- No API credentials needed for uploads
+- Human-like delays to avoid detection
+
+**🤖 Local AI Inference**
+- Full Ollama integration with UI controls
+- Start/stop server from the app
+- One-click model downloads
+- Offline-capable AI scoring
 
 ## 🎯 Overview
 
 This system intelligently:
 - **Analyzes** long-form video content
 - **Identifies** high-engagement, viral-potential segments
-- **Extracts** platform-optimized short videos
+- **Extracts** platform-optimized short videos (9:16 aspect ratio)
 - **Generates** captions and hashtags
-- **Schedules** uploads with rate limiting
-- **Publishes** to TikTok, Instagram Reels, and YouTube Shorts via official APIs
+- **Uploads** to TikTok, Instagram Reels, and YouTube Shorts via browser automation
+- **Provides** a beautiful desktop UI for the entire workflow
 
 **This is a real production system** — fully implemented, no placeholders, no mock data.
+
+---
+
+## 🚀 Quick Start (Desktop UI)
+
+### Prerequisites
+
+1. **Python 3.8+** installed
+2. **FFmpeg** - Must be installed and available in PATH
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install ffmpeg
+   
+   # macOS
+   brew install ffmpeg
+   
+   # Windows
+   # Download from https://ffmpeg.org/download.html
+   ```
+
+3. **Brave Browser** (recommended for uploads)
+   - Download: https://brave.com/download/
+   - Or configure path to any Chromium browser
+
+4. **Ollama** (optional, for local AI)
+   - Download: https://ollama.ai/download/
+   - Provides free, offline AI inference
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/Aaryanrao0001/asfs.git
+   cd asfs
+   ```
+
+2. **Install Python dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Install Playwright browsers** (for browser automation)
+   ```bash
+   playwright install chromium
+   ```
+
+### Running the Desktop App
+
+**Launch the GUI** (default):
+```bash
+python main.py
+```
+
+The desktop application will open with 5 tabs:
+1. **📹 Input Video** - Select your video file
+2. **🤖 AI / Model** - Control Ollama and AI settings
+3. **📝 Metadata** - Configure titles, descriptions, tags
+4. **🚀 Upload** - Select platforms and browser settings
+5. **▶️ Run & Monitor** - Execute pipeline and view live logs
+
+### First-Time Setup
+
+1. **AI Configuration (Tab 2)**:
+   - Option A: Install Ollama for free local AI
+     - Click "Start Ollama" → "Load Model" (qwen2.5:3b-instruct)
+   - Option B: Use GitHub Models API
+     - Set `GITHUB_TOKEN` environment variable
+     - Select "api" backend mode
+
+2. **Browser Configuration (Tab 4)**:
+   - Browse to Brave executable (or leave empty for auto-detect)
+   - Optionally set profile path to reuse login sessions
+   - Log into TikTok/Instagram/YouTube in Brave beforehand
+
+3. **Metadata Settings (Tab 3)**:
+   - Choose "Uniform" (same metadata) or "Randomized" (vary per clip)
+   - Enter titles, descriptions, and tags
+   - Enable/disable hashtag prefix
+
+4. **Run Pipeline (Tab 5)**:
+   - Select video in Tab 1
+   - Click "▶ Run Pipeline"
+   - Monitor progress in real-time
+
+---
+
+## 🖥️ Desktop UI Features
+
+### Tab 1: Input Video
+- **File picker** with drag-drop support
+- **Output directory** configuration
+- File size and info display
+
+### Tab 2: AI / Model Settings
+- **Ollama Controls**:
+  - Start/Stop server
+  - Load models (qwen2.5:3b-instruct, etc.)
+  - Real-time status indicators
+- **Model Configuration**:
+  - LLM backend selector (auto/local/api)
+  - Temperature control
+  - Score threshold slider
+
+### Tab 3: Metadata Settings
+- **Two Modes**:
+  - **Uniform**: Same metadata for all clips
+  - **Randomized**: Random selection from comma-separated values
+- **Fields**:
+  - Title(s)
+  - Description(s)
+  - Tags (comma-separated)
+  - Hashtag prefix toggle
+
+### Tab 4: Upload Platforms
+- **Platform Selection**: TikTok, Instagram, YouTube Shorts
+- **Brave Browser**: Auto-detect or custom path
+- **Profile Reuse**: Use existing login sessions
+- **Anti-Ban Settings**: Configurable upload delays
+
+### Tab 5: Run & Monitor
+- **Live Logs**: Real-time pipeline output
+- **Progress Bar**: Visual stage indicators
+- **Controls**: Run, Stop, Clear Logs
+- **Status Display**: Running/Success/Error states
+
+---
+
+## ⌨️ CLI Mode (Backward Compatible)
+
+The original CLI interface is still available:
+
+```bash
+python main.py --cli <video_path> [options]
+```
+
+### CLI Usage
+
+```bash
+# Basic usage
+python main.py --cli path/to/video.mp4
+
+# Custom output directory
+python main.py --cli video.mp4 -o custom_output/
+
+# Disable caching (force full reprocessing)
+python main.py --cli video.mp4 --no-cache
+
+# Verbose logging
+python main.py --cli video.mp4 -v
+```
+
+### CLI Help
+
+```bash
+python main.py --cli --help
+```
+
+
+---
+
+## 📦 Building Executable
+
+Build a standalone `.exe` file for distribution:
+
+### Quick Build
+
+```bash
+python build.py
+```
+
+This creates `dist/asfs.exe` (Windows) or equivalent on other platforms.
+
+### Manual Build with PyInstaller
+
+```bash
+pyinstaller main.py --name=asfs --onefile --windowed --add-data=config:config
+```
+
+### Notes on Distribution
+
+1. **Playwright Browsers**: End users need to run `playwright install chromium` once
+2. **FFmpeg**: Must be installed separately on user's system
+3. **Ollama**: Optional - users can install for local AI features
+4. **Executable Size**: Expect ~100-200MB due to bundled Python and dependencies
+
+### Alternative: Direct Python
+
+Users can also run directly with Python (no build needed):
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+---
 
 ## 🏗️ Architecture
 
@@ -46,23 +261,50 @@ Audit Logs & Retry System
 
 ```
 asfs/
-├── ingest/              # Video normalization (not used in MVP)
+├── ui/                  # Desktop application (NEW)
 │   ├── __init__.py
-│   └── normalize.py     # FFmpeg video standardization
+│   ├── app.py           # QApplication entry point
+│   ├── main_window.py   # Main window with tabs
+│   ├── styles.py        # Dark theme stylesheet
+│   ├── tabs/            # Individual tab widgets
+│   │   ├── input_tab.py      # Video selection
+│   │   ├── ai_tab.py         # Ollama controls
+│   │   ├── metadata_tab.py   # Metadata settings
+│   │   ├── upload_tab.py     # Platform config
+│   │   └── run_tab.py        # Pipeline execution
+│   └── workers/         # Background threads
+│       ├── ollama_worker.py   # Ollama operations
+│       └── pipeline_worker.py # Pipeline execution
+├── uploaders/           # Browser-based uploaders (UPDATED)
+│   ├── __init__.py
+│   ├── brave_base.py    # Playwright + Brave automation
+│   ├── brave_tiktok.py  # TikTok browser upload
+│   ├── brave_instagram.py # Instagram browser upload
+│   ├── brave_youtube.py # YouTube Shorts browser upload
+│   ├── tiktok.py        # Legacy API uploader (deprecated)
+│   ├── instagram.py     # Legacy API uploader (deprecated)
+│   └── youtube.py       # Legacy API uploader (deprecated)
+├── ai/                  # AI highlight scoring (UPDATED)
+│   ├── __init__.py
+│   ├── scorer.py        # GitHub Models + Ollama integration
+│   ├── ollama_manager.py # Ollama server management (NEW)
+│   └── prompt.txt       # Scoring prompt template
+├── metadata/            # Caption & metadata (UPDATED)
+│   ├── __init__.py
+│   ├── captions.py      # Platform-specific captions
+│   ├── hashtags.py      # Hashtag strategies
+│   ├── config.py        # MetadataConfig class (NEW)
+│   └── resolver.py      # Metadata resolution (NEW)
 ├── transcript/          # Transcription & quality
 │   ├── __init__.py
-│   ├── transcribe.py    # Faster-Whisper transcription (multi-threaded)
+│   ├── transcribe.py    # Faster-Whisper transcription
 │   ├── audio_extract.py # Fast audio extraction
 │   └── quality_check.py # Transcript validation
 ├── segmenter/           # Candidate segment building
 │   ├── __init__.py
 │   ├── sentence_window.py  # Sentence-based windowing
 │   └── pause_window.py     # Pause-based windowing
-├── ai/                  # AI highlight scoring
-│   ├── __init__.py
-│   ├── scorer.py        # GitHub Models integration
-│   └── prompt.txt       # Scoring prompt template
-├── cache/               # Pipeline state caching (NEW)
+├── cache/               # Pipeline state caching
 │   ├── __init__.py
 │   └── checkpoint.py    # Resume from last completed stage
 ├── validator/           # Clip validation
@@ -72,18 +314,9 @@ asfs/
 ├── clipper/             # Clip extraction
 │   ├── __init__.py
 │   └── extract.py       # FFmpeg clip extraction
-├── metadata/            # Caption & hashtag generation
-│   ├── __init__.py
-│   ├── captions.py      # Platform-specific captions
-│   └── hashtags.py      # Hashtag strategies
 ├── scheduler/           # Upload scheduling
 │   ├── __init__.py
 │   └── queue.py         # Rate limiting & retry logic
-├── uploaders/           # Platform upload APIs
-│   ├── __init__.py
-│   ├── tiktok.py        # TikTok Content Posting API
-│   ├── instagram.py     # Instagram Graph API
-│   └── youtube.py       # YouTube Data API v3
 ├── audit/               # Logging & audit trail
 │   ├── __init__.py
 │   └── logger.py        # SQLite audit logging
@@ -91,10 +324,11 @@ asfs/
 │   ├── platforms.json   # Platform specifications
 │   ├── rate_limits.json # Upload rate limits
 │   └── model.yaml       # AI model configuration
-├── main.py              # Main orchestrator
+├── main.py              # Main entry point (GUI/CLI router)
+├── pipeline.py          # Pipeline logic (CLI mode)
+├── build.py             # PyInstaller build script
 ├── requirements.txt     # Python dependencies
-├── CACHE_FEATURE.md     # Caching documentation
-└── README.md           # This file
+└── README.md            # This file
 ```
 
 ## 🚀 Quick Start

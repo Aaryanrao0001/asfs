@@ -31,7 +31,7 @@ model:
   llm_backend: "auto"
   
   # Local LLM Configuration (Ollama)
-  local_model_name: "qwen3:latest"  # Supported: qwen3:latest, qwen3:8b, qwen3:14b
+  local_model_name: "qwen2.5:3b-instruct"  # Supported: qwen2.5:3b-instruct, qwen2.5:7b-instruct
   local_endpoint: "http://localhost:11434"
   
   # Ollama-specific settings

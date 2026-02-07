@@ -66,3 +66,15 @@ temp/
 
 # Whisper models cache
 ~/.cache/whisper/
+
+# PyInstaller build artifacts
+*.spec
+build/
+dist/
+*.exe
+
+# Playwright browsers
+.playwright/
+
+# UI temp files
+ui_settings.json

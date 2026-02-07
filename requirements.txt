@@ -7,7 +7,7 @@ PyYAML==6.0.1
 azure-ai-inference==1.0.0b3
 openai>=1.0.0
 
-# Google API for YouTube
+# Google API for YouTube (legacy - being replaced with browser automation)
 google-api-python-client==2.108.0
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
@@ -25,6 +25,14 @@ numpy==1.26.2
 # Utilities
 python-dotenv==1.0.0
 
-# Optional: Local LLM support (Ollama)
-# Uncomment the line below to enable local inference
-# ollama>=0.1.0
+# Local LLM support (Ollama) - now required
+ollama>=0.1.0
+
+# UI Framework
+PySide6>=6.6.0
+
+# Browser Automation
+playwright>=1.40.0
+
+# Build
+pyinstaller>=6.0.0
