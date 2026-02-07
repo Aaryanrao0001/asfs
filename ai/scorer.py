@@ -617,7 +617,7 @@ def score_segments(
         ollama_available = check_ollama_availability(local_model_name, endpoint=local_endpoint)
         
         if ollama_available:
-            logger.info(f"Backend: Local LLM (Ollama) - model: {local_model_name}")
+            logger.info(f"Ollama is running with model: {local_model_name}")
         else:
             if llm_backend == "local":
                 logger.warning("Backend: LOCAL required but Ollama unavailable - falling back to API")
@@ -627,7 +627,7 @@ def score_segments(
         logger.warning(f"Unknown llm_backend '{llm_backend}', defaulting to 'auto'")
         ollama_available = check_ollama_availability(local_model_name, endpoint=local_endpoint)
         if ollama_available:
-            logger.info(f"Backend: Local LLM (Ollama) - model: {local_model_name}")
+            logger.info(f"Ollama is running with model: {local_model_name}")
         else:
             logger.info("Backend: AUTO - Ollama unavailable, using API")
     
@@ -642,31 +642,47 @@ def score_segments(
     
     scored_segments = []
     
-    # Initialize AI client
+    # Determine effective batch size based on backend
+    # Ollama doesn't support batching, so we force single-segment processing
+    BATCH_SIZE = model_config.get('batch_size', 6)  # Get configured batch size
+    
+    if ollama_available:
+        effective_batch_size = 1  # Force single-segment processing for Ollama
+        logger.info("Local LLM detected → disabling batching (processing one segment at a time)")
+        logger.info(f"Backend: Local LLM (Ollama)")
+        logger.info(f"✅ Will score {len(segments_to_score)} segments using LOCAL Ollama (one-by-one)")
+    else:
+        effective_batch_size = BATCH_SIZE
+        logger.info(f"Using API backend → batch processing enabled (batch_size={effective_batch_size})")
+        logger.info(f"✅ Will score {len(segments_to_score)} segments using API ({effective_batch_size} per batch)")
+    
+    # Initialize AI client only when NOT using Ollama exclusively
     client = None
     
-    if AZURE_SDK_AVAILABLE:
-        try:
-            client = ChatCompletionsClient(
-                endpoint=endpoint,
-                credential=AzureKeyCredential(api_key)
-            )
-            logger.info("Using Azure AI Inference SDK")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Azure SDK: {e}")
-    
-    if client is None and OPENAI_SDK_AVAILABLE:
-        try:
-            client = OpenAI(
-                base_url=endpoint,
-                api_key=api_key
-            )
-            logger.info("Using OpenAI SDK")
-        except Exception as e:
-            logger.warning(f"Failed to initialize OpenAI SDK: {e}")
-    
-    if client is None:
-        raise RuntimeError("No compatible SDK available. Install azure-ai-inference or openai.")
+    # Only initialize API client if we might use it
+    if not ollama_available or llm_backend == "auto":
+        if AZURE_SDK_AVAILABLE:
+            try:
+                client = ChatCompletionsClient(
+                    endpoint=endpoint,
+                    credential=AzureKeyCredential(api_key)
+                )
+                logger.info("Using Azure AI Inference SDK")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Azure SDK: {e}")
+        
+        if client is None and OPENAI_SDK_AVAILABLE:
+            try:
+                client = OpenAI(
+                    base_url=endpoint,
+                    api_key=api_key
+                )
+                logger.info("Using OpenAI SDK")
+            except Exception as e:
+                logger.warning(f"Failed to initialize OpenAI SDK: {e}")
+        
+        if client is None and not ollama_available:
+            raise RuntimeError("No compatible SDK available. Install azure-ai-inference or openai.")
     
     # Define system message once (used for all segments)
     system_message = """You are a video content analyzer. 
@@ -680,34 +696,32 @@ CRITICAL: You MUST respond with ONLY valid JSON.
     api_calls_made = 0
     tokens_used = 0
     
-    # Get batch size and other config
-    BATCH_SIZE = model_config.get('batch_size', 6)  # Process 6 segments per API call
+    # Get other config
     inter_request_delay = model_config.get('inter_request_delay', 1.5)
     max_cooldown_threshold = model_config.get('max_cooldown_threshold', 60)
     
-    # Process segments in batches
-    for batch_start in range(0, len(segments_to_score), BATCH_SIZE):
-        batch_end = min(batch_start + BATCH_SIZE, len(segments_to_score))
+    # Process segments with effective batch size
+    for batch_start in range(0, len(segments_to_score), effective_batch_size):
+        batch_end = min(batch_start + effective_batch_size, len(segments_to_score))
         batch_segments = segments_to_score[batch_start:batch_end]
         
-        # For single segment, use original logic; for multiple, use batch
-        if len(batch_segments) == 1:
-            segment = batch_segments[0]
-            idx = batch_start
-            
-            try:
-                # Format prompt with segment data using token replacement
-                prompt = (
-                    prompt_template
-                    .replace("{{SEGMENT_TEXT}}", segment["text"])
-                    .replace("{{DURATION}}", f"{segment['duration']:.1f}")
-                )
+        # Separate Ollama path from API path
+        if ollama_available:
+            # Process with Ollama (one segment at a time)
+            for i, segment in enumerate(batch_segments):
+                idx = batch_start + i
                 
-                ai_analysis = None
-                used_local = False
-                
-                # Try local model first if available
-                if ollama_available:
+                try:
+                    # Format prompt with segment data using token replacement
+                    prompt = (
+                        prompt_template
+                        .replace("{{SEGMENT_TEXT}}", segment["text"])
+                        .replace("{{DURATION}}", f"{segment['duration']:.1f}")
+                    )
+                    
+                    ai_analysis = None
+                    
+                    # Try local model
                     try:
                         ai_analysis = score_with_ollama(
                             segment=segment,
@@ -716,19 +730,128 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                             temperature=temperature,
                             endpoint=local_endpoint
                         )
-                        used_local = True
-                        logger.debug(f"Segment {idx + 1}: scored with local LLM")
+                        logger.debug(f"Segment {idx + 1}/{len(segments_to_score)}: scored with LOCAL Ollama")
                         
                     except Exception as local_error:
                         logger.warning(f"Local LLM failed for segment {idx + 1}: {local_error}")
-                        logger.info("Falling back to remote API")
-                        ai_analysis = None  # Force API fallback
+                        
+                        # Fallback to API if auto mode
+                        if llm_backend == "auto" and client is not None:
+                            logger.info("Falling back to remote API")
+                            ai_response = None
+                            api_call_succeeded = False
+                            max_retries = 3
+                            
+                            for attempt in range(max_retries + 1):
+                                try:
+                                    if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
+                                        response = client.complete(
+                                            messages=[
+                                                {"role": "system", "content": system_message},
+                                                {"role": "user", "content": prompt}
+                                            ],
+                                            model=model_name,
+                                            temperature=temperature,
+                                            max_tokens=1024,
+                                            response_format={"type": "json_object"}
+                                        )
+                                        ai_response = response.choices[0].message.content
+                                        
+                                        # Track token usage
+                                        if hasattr(response, 'usage'):
+                                            tokens_used += response.usage.total_tokens
+                                        
+                                    else:  # OpenAI SDK
+                                        response = client.chat.completions.create(
+                                            model=model_name,
+                                            messages=[
+                                                {"role": "system", "content": system_message},
+                                                {"role": "user", "content": prompt}
+                                            ],
+                                            temperature=temperature,
+                                            max_tokens=1024,
+                                            response_format={"type": "json_object"}
+                                        )
+                                        ai_response = response.choices[0].message.content
+                                        
+                                        # Track token usage
+                                        if hasattr(response, 'usage'):
+                                            tokens_used += response.usage.total_tokens
+                                    
+                                    api_call_succeeded = True
+                                    break
+                                    
+                                except Exception as api_error:
+                                    # Check for rate limiting (429)
+                                    is_rate_limit = False
+                                    retry_after = None
+                                    
+                                    if hasattr(api_error, 'status_code') and api_error.status_code == 429:
+                                        is_rate_limit = True
+                                        # Try to extract retry-after
+                                        if hasattr(api_error, 'response') and hasattr(api_error.response, 'headers'):
+                                            retry_after = api_error.response.headers.get('retry-after')
+                                            if retry_after:
+                                                retry_after = int(retry_after)
+                                    
+                                    if is_rate_limit and retry_after and retry_after > 60:
+                                        logger.error(f"Rate limit with long cooldown ({retry_after}s). Stopping.")
+                                        raise RuntimeError(f"Rate limit exceeded: retry after {retry_after}s")
+                                    
+                                    if attempt < max_retries:
+                                        # Exponential backoff with jitter
+                                        if is_rate_limit and retry_after:
+                                            backoff = retry_after + random.uniform(1, 5)
+                                        else:
+                                            backoff = min(60, (2 ** attempt) + random.uniform(0, 1))
+                                        
+                                        logger.warning(f"API call failed for segment {idx + 1}, retrying in {backoff:.1f}s... ({api_error})")
+                                        time.sleep(backoff)
+                                    else:
+                                        logger.error(f"API call failed for segment {idx + 1} after {max_retries + 1} attempts: {api_error}")
+                                        raise
+                            
+                            if api_call_succeeded and ai_response is not None:
+                                # Parse API response
+                                try:
+                                    ai_analysis = extract_json_safe(ai_response)
+                                    logger.debug(f"Segment {idx + 1}: scored with API (fallback)")
+                                except ValueError as e:
+                                    logger.warning(f"Failed to parse API response for segment {idx + 1}: {e}")
+                                    raise
+                        else:
+                            # No fallback available
+                            raise
+                    
+                    # Process the segment response
+                    if ai_analysis is not None:
+                        scored_segment = process_single_segment_response(segment, ai_analysis, idx)
+                        scored_segments.append(scored_segment)
+                    else:
+                        scored_segments.append(create_fallback_segment(segment))
+                    
+                except Exception as e:
+                    logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
+                    scored_segments.append(create_fallback_segment(segment))
+        
+        else:
+            # Process with API (batched)
+            if len(batch_segments) == 1:
+                # Single segment API processing
+                segment = batch_segments[0]
+                idx = batch_start
                 
-                # Fallback to API if local failed or unavailable
-                if ai_analysis is None:
+                try:
+                    # Format prompt with segment data using token replacement
+                    prompt = (
+                        prompt_template
+                        .replace("{{SEGMENT_TEXT}}", segment["text"])
+                        .replace("{{DURATION}}", f"{segment['duration']:.1f}")
+                    )
+                    
                     ai_response = None
                     api_call_succeeded = False
-                    max_retries = 3  # Increased from 1
+                    max_retries = 3
                     
                     for attempt in range(max_retries + 1):
                         try:
@@ -805,152 +928,148 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                     # Parse API response
                     try:
                         ai_analysis = extract_json_safe(ai_response)
-                        logger.debug(f"Segment {idx + 1}: scored with API")
+                        logger.debug(f"Segment {idx + 1}/{len(segments_to_score)}: scored with API")
                     except ValueError as e:
                         logger.warning(f"Failed to parse API response for segment {idx + 1}: {e}")
                         raise
-                
-                # Log raw output for first segment only
-                if idx == 0:
-                    source = "local LLM" if used_local else "API"
-                    logger.info(f"Using {source} for scoring")
-                
-                # Process single segment response
-                scored_segment = process_single_segment_response(segment, ai_analysis, idx)
-                scored_segments.append(scored_segment)
-                
-                # Add delay between requests (only for API calls)
-                if not used_local and idx < len(segments_to_score) - 1:
-                    time.sleep(inter_request_delay)
-                
-            except Exception as e:
-                logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
-                scored_segments.append(create_fallback_segment(segment))
-        
-        else:
-            # Batch processing for multiple segments
-            try:
-                # Create batch prompt
-                batch_prompt = create_batch_prompt(batch_segments, prompt_template)
-                
-                # Call AI model with retry logic
-                ai_response = None
-                api_call_succeeded = False
-                max_retries = 1
-                
-                for attempt in range(max_retries + 1):
-                    try:
-                        if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
-                            response = client.complete(
-                                messages=[
-                                    {"role": "system", "content": system_message},
-                                    {"role": "user", "content": batch_prompt}
-                                ],
-                                model=model_name,
-                                temperature=0.2,  # Changed from 0.7
-                                max_tokens=4096,  # Larger for batch responses
-                                response_format={"type": "json_object"}
-                            )
-                            
-                            ai_response = response.choices[0].message.content
-                            
-                            # Track token usage
-                            if hasattr(response, 'usage'):
-                                tokens_used += response.usage.total_tokens
-                            
-                        else:  # OpenAI SDK
-                            response = client.chat.completions.create(
-                                model=model_name,
-                                messages=[
-                                    {"role": "system", "content": system_message},
-                                    {"role": "user", "content": batch_prompt}
-                                ],
-                                temperature=0.2,  # Changed from 0.7
-                                max_tokens=4096,  # Larger for batch responses
-                                response_format={"type": "json_object"}
-                            )
-                            
-                            ai_response = response.choices[0].message.content
-                            
-                            # Track token usage
-                            if hasattr(response, 'usage'):
-                                tokens_used += response.usage.total_tokens
-                        
-                        # API call succeeded
-                        api_call_succeeded = True
-                        api_calls_made += 1
-                        logger.info(f"API call {api_calls_made}: {len(batch_segments)} segments, {tokens_used} tokens used so far")
-                        
-                        # Add inter-request delay
-                        if batch_start > 0:
-                            time.sleep(inter_request_delay)
-                        
-                        break
-                        
-                    except Exception as api_error:
-                        # Check if it's a 429 rate limit error
-                        if hasattr(api_error, 'status_code') and api_error.status_code == 429:
-                            retry_after = extract_retry_after(api_error)
-                            if retry_after and retry_after > max_cooldown_threshold:
-                                logger.error(f"Rate limit exceeded with long cooldown ({retry_after}s). Stopping scoring.")
-                                remaining = segments_to_score[batch_start:]
-                                save_pipeline_state(scored_segments, remaining)
-                                return scored_segments
-                            
-                            sleep_time = (retry_after or 10) + random.uniform(1, 5)
-                            logger.warning(f"Rate limited. Sleeping for {sleep_time:.1f}s")
-                            time.sleep(sleep_time)
-                            continue
-                        
-                        if attempt < max_retries:
-                            backoff = min(300, (2 ** attempt) + random.uniform(0, 1))
-                            logger.warning(f"API call failed for batch starting at {batch_start + 1}, retrying in {backoff:.1f}s... ({api_error})")
-                            time.sleep(backoff)
-                        else:
-                            logger.error(f"API call failed for batch after {max_retries + 1} attempts: {api_error}")
-                            raise
-                
-                if not api_call_succeeded or ai_response is None:
-                    raise RuntimeError("API call failed and no response received")
-                
-                # Parse batch response
-                batch_analysis = extract_json_safe(ai_response)
-                
-                # Extract results array
-                results = batch_analysis.get('results', [])
-                
-                if not results:
-                    logger.warning("Batch response missing 'results' array, falling back to individual parsing")
-                    # Fallback: try to treat as single response
-                    results = [batch_analysis]
-                
-                # Process each result and match to original segments
-                for i, segment in enumerate(batch_segments):
-                    idx = batch_start + i
                     
-                    # Find matching result by id
-                    result = None
-                    for r in results:
-                        if r.get('id') == i + 1:
-                            result = r
-                            break
+                    # Process single segment response
+                    scored_segment = process_single_segment_response(segment, ai_analysis, idx)
+                    scored_segments.append(scored_segment)
                     
-                    if result is None and i < len(results):
-                        # Fallback: use positional matching
-                        result = results[i]
+                    # Add delay between requests
+                    if idx < len(segments_to_score) - 1:
+                        time.sleep(inter_request_delay)
                     
-                    if result:
-                        scored_segment = process_single_segment_response(segment, result, idx)
-                        scored_segments.append(scored_segment)
-                    else:
-                        logger.warning(f"No result found for segment {idx + 1} in batch")
-                        scored_segments.append(create_fallback_segment(segment))
-                
-            except Exception as e:
-                logger.error(f"Failed to score batch starting at {batch_start + 1}: {str(e)}")
-                # Add fallback for all segments in batch
-                for i, segment in enumerate(batch_segments):
+                except Exception as e:
+                    logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
                     scored_segments.append(create_fallback_segment(segment))
+            
+            else:
+                # Batch processing for multiple segments
+                try:
+                    # Create batch prompt
+                    batch_prompt = create_batch_prompt(batch_segments, prompt_template)
+                    
+                    # Call AI model with retry logic
+                    ai_response = None
+                    api_call_succeeded = False
+                    max_retries = 1
+                    
+                    for attempt in range(max_retries + 1):
+                        try:
+                            if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
+                                response = client.complete(
+                                    messages=[
+                                        {"role": "system", "content": system_message},
+                                        {"role": "user", "content": batch_prompt}
+                                    ],
+                                    model=model_name,
+                                    temperature=temperature,
+                                    max_tokens=4096,  # Larger for batch responses
+                                    response_format={"type": "json_object"}
+                                )
+                                
+                                ai_response = response.choices[0].message.content
+                                
+                                # Track token usage
+                                if hasattr(response, 'usage'):
+                                    tokens_used += response.usage.total_tokens
+                                
+                            else:  # OpenAI SDK
+                                response = client.chat.completions.create(
+                                    model=model_name,
+                                    messages=[
+                                        {"role": "system", "content": system_message},
+                                        {"role": "user", "content": batch_prompt}
+                                    ],
+                                    temperature=temperature,
+                                    max_tokens=4096,  # Larger for batch responses
+                                    response_format={"type": "json_object"}
+                                )
+                                
+                                ai_response = response.choices[0].message.content
+                                
+                                # Track token usage
+                                if hasattr(response, 'usage'):
+                                    tokens_used += response.usage.total_tokens
+                            
+                            # API call succeeded
+                            api_call_succeeded = True
+                            api_calls_made += 1
+                            logger.debug(f"Batch {(batch_start // effective_batch_size) + 1}: scored {len(batch_segments)} segments with API")
+                            logger.info(f"API call {api_calls_made}: {len(batch_segments)} segments, {tokens_used} tokens used so far")
+                            
+                            # Add inter-request delay
+                            if batch_start > 0:
+                                time.sleep(inter_request_delay)
+                            
+                            break
+                            
+                        except Exception as api_error:
+                            # Check if it's a 429 rate limit error
+                            if hasattr(api_error, 'status_code') and api_error.status_code == 429:
+                                retry_after = extract_retry_after(api_error)
+                                if retry_after and retry_after > max_cooldown_threshold:
+                                    logger.error(f"Rate limit exceeded with long cooldown ({retry_after}s). Stopping scoring.")
+                                    remaining = segments_to_score[batch_start:]
+                                    save_pipeline_state(scored_segments, remaining)
+                                    return scored_segments
+                                
+                                sleep_time = (retry_after or 10) + random.uniform(1, 5)
+                                logger.warning(f"Rate limited. Sleeping for {sleep_time:.1f}s")
+                                time.sleep(sleep_time)
+                                continue
+                            
+                            if attempt < max_retries:
+                                backoff = min(300, (2 ** attempt) + random.uniform(0, 1))
+                                logger.warning(f"API call failed for batch starting at {batch_start + 1}, retrying in {backoff:.1f}s... ({api_error})")
+                                time.sleep(backoff)
+                            else:
+                                logger.error(f"API call failed for batch after {max_retries + 1} attempts: {api_error}")
+                                raise
+                    
+                    if not api_call_succeeded or ai_response is None:
+                        raise RuntimeError("API call failed and no response received")
+                    
+                    # Parse batch response
+                    batch_analysis = extract_json_safe(ai_response)
+                    
+                    # Extract results array
+                    results = batch_analysis.get('results', [])
+                    
+                    if not results:
+                        logger.warning("Batch response missing 'results' array, falling back to individual parsing")
+                        # Fallback: try to treat as single response
+                        results = [batch_analysis]
+                    
+                    # Process each result and match to original segments
+                    for i, segment in enumerate(batch_segments):
+                        idx = batch_start + i
+                        
+                        # Find matching result by id
+                        result = None
+                        for r in results:
+                            if r.get('id') == i + 1:
+                                result = r
+                                break
+                        
+                        if result is None and i < len(results):
+                            # Fallback: use positional matching
+                            result = results[i]
+                        
+                        if result:
+                            scored_segment = process_single_segment_response(segment, result, idx)
+                            scored_segments.append(scored_segment)
+                        else:
+                            logger.warning(f"No result found for segment {idx + 1} in batch")
+                            scored_segments.append(create_fallback_segment(segment))
+                    
+                except Exception as e:
+                    logger.error(f"Failed to score batch starting at {batch_start + 1}: {str(e)}")
+                    # Add fallback for all segments in batch
+                    for i, segment in enumerate(batch_segments):
+                        scored_segments.append(create_fallback_segment(segment))
     
     # Sort by overall score (highest first)
     scored_segments.sort(key=lambda x: x.get("overall_score", 0), reverse=True)
