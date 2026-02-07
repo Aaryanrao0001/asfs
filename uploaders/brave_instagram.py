@@ -13,15 +13,15 @@ from .brave_base import BraveBrowserBase
 logger = logging.getLogger(__name__)
 
 # Instagram Create button selectors (ordered by reliability)
-# Instagram frequently changes UI through A/B testing, so we try multiple strategies
+# Use stable semantic selectors - ARIA labels and roles, NOT hashed CSS classes
+# These selectors survive Instagram's frequent UI deployments
 INSTAGRAM_CREATE_SELECTORS = [
-    'svg[aria-label*="New"]',  # Icon-based
-    'a[href*="create"]',  # Link-based
-    '[role="menuitem"]:has-text("Create")',  # Role-based menuitem
-    'button[role="button"]:has-text("Create")',  # Role-based button
-    'div[role="button"]:has-text("Create")',  # Div acting as button
-    '[aria-label*="Create"]',  # Generic aria-label
-    'text="Create"'  # Text fallback
+    'svg[aria-label="New post"]',  # Most stable - exact ARIA label match
+    'svg[aria-label*="New"]',  # Fallback - partial ARIA label match
+    'a[href*="create"]',  # Link-based navigation
+    '[role="link"][href*="create"]',  # Role-based link
+    'div[role="button"]:has-text("Create")',  # Role + text (React div acting as button)
+    '[aria-label*="Create"]',  # Generic aria-label fallback
 ]
 
 
@@ -128,9 +128,12 @@ def upload_to_instagram_browser(
         logger.info("Navigating through editing steps")
         for i in range(3):  # Usually 2-3 "Next" clicks needed
             try:
-                next_button = page.wait_for_selector('button:has-text("Next")', timeout=5000)
+                # Use role-based selector - more stable than class names
+                # Instagram uses div[role="button"] for Next button
+                next_button = page.wait_for_selector('div[role="button"]:has-text("Next"), button:has-text("Next")', timeout=5000)
                 if next_button:
                     next_button.click()
+                    # Wait for state transition - Instagram is React-heavy
                     browser.human_delay(2, 3)
             except:
                 break  # No more Next buttons
@@ -140,8 +143,9 @@ def upload_to_instagram_browser(
         
         logger.info("Filling caption")
         try:
-            # Caption field selector
-            caption_selector = 'textarea[aria-label*="caption"], textarea[placeholder*="caption"]'
+            # Use stable role-based selector - Instagram uses div[role="textbox"]
+            # Prefer role + aria attributes over class names
+            caption_selector = 'div[role="textbox"][aria-label*="caption"], textarea[aria-label*="caption"], div[role="textbox"], textarea[placeholder*="caption"]'
             browser.human_type(caption_selector, full_caption)
         except Exception as e:
             logger.warning(f"Caption input failed: {e}")
@@ -151,7 +155,8 @@ def upload_to_instagram_browser(
         # Click "Share" button
         logger.info("Clicking Share button")
         try:
-            share_button_selector = 'button:has-text("Share")'
+            # Use role-based selector - Instagram uses div[role="button"] for Share
+            share_button_selector = 'div[role="button"]:has-text("Share"), button:has-text("Share")'
             page.wait_for_selector(share_button_selector, timeout=5000)
             browser.click_and_wait(share_button_selector, delay=3)
         except Exception as e:
@@ -335,9 +340,12 @@ def _upload_to_instagram_with_manager(
         logger.info("Navigating through editing steps")
         for i in range(3):
             try:
-                next_button = page.wait_for_selector('button:has-text("Next")', timeout=5000)
+                # Use role-based selector - more stable than class names
+                # Instagram uses div[role="button"] for Next button
+                next_button = page.wait_for_selector('div[role="button"]:has-text("Next"), button:has-text("Next")', timeout=5000)
                 if next_button:
                     next_button.click()
+                    # Wait for state transition - Instagram is React-heavy
                     page.wait_for_timeout(random.randint(2000, 3000))
             except:
                 break
@@ -347,7 +355,9 @@ def _upload_to_instagram_with_manager(
         
         logger.info("Filling caption")
         try:
-            caption_selector = 'textarea[aria-label*="caption"], textarea[placeholder*="caption"]'
+            # Use stable role-based selector - Instagram uses div[role="textbox"]
+            # Prefer role + aria attributes over class names
+            caption_selector = 'div[role="textbox"][aria-label*="caption"], textarea[aria-label*="caption"], div[role="textbox"], textarea[placeholder*="caption"]'
             element = page.wait_for_selector(caption_selector, timeout=10000)
             element.click()
             page.keyboard.press("Control+A")
@@ -362,7 +372,8 @@ def _upload_to_instagram_with_manager(
         # Click "Share" button
         logger.info("Clicking Share button")
         try:
-            share_button_selector = 'button:has-text("Share")'
+            # Use role-based selector - Instagram uses div[role="button"] for Share
+            share_button_selector = 'div[role="button"]:has-text("Share"), button:has-text("Share")'
             page.wait_for_selector(share_button_selector, timeout=5000)
             share_button = page.query_selector(share_button_selector)
             share_button.click()

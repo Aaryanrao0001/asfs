@@ -106,17 +106,18 @@ def upload_to_tiktok_browser(
         
         logger.info("Filling caption")
         try:
-            # Common caption selectors (update as needed):
-            # - [data-e2e="caption-input"]
-            # - textarea[placeholder*="caption"]
-            # - div[contenteditable="true"][data-text*="describe"]
-            caption_selector = '[data-e2e="caption-input"]'
+            # Stable selectors: data-e2e attributes are TikTok's test identifiers
+            # Also try role-based contenteditable as fallback
+            caption_selector = '[data-e2e="caption-input"], div[contenteditable="true"][aria-label*="caption"], div[contenteditable="true"]'
             browser.human_type(caption_selector, full_caption)
         except Exception as e:
-            logger.warning(f"Primary caption selector failed, trying alternative: {e}")
-            # Try contenteditable div
-            caption_selector = 'div[contenteditable="true"]'
-            browser.human_type(caption_selector, full_caption)
+            logger.warning(f"Caption input failed: {e}")
+            # Last resort - try any contenteditable
+            try:
+                caption_selector = 'div[contenteditable="true"]'
+                browser.human_type(caption_selector, full_caption)
+            except:
+                logger.error("All caption selectors failed")
         
         browser.human_delay(2, 3)
         
@@ -126,17 +127,13 @@ def upload_to_tiktok_browser(
         # Click Post/Upload button
         logger.info("Clicking Post button")
         try:
-            # Common post button selectors:
-            # - [data-e2e="post-button"]
-            # - button containing "Post"
-            post_button_selector = '[data-e2e="post-button"]'
+            # Stable selectors: data-e2e + role-based + text fallbacks
+            # TikTok uses div[role="button"] or button elements
+            post_button_selector = '[data-e2e="post-button"], div[role="button"]:has-text("Post"), button:has-text("Post")'
             page.wait_for_selector(post_button_selector, timeout=5000)
             browser.click_and_wait(post_button_selector, delay=3)
         except Exception as e:
-            logger.warning(f"Primary post button selector failed, trying alternative: {e}")
-            # Try text-based selector
-            post_button_selector = 'button:has-text("Post")'
-            browser.click_and_wait(post_button_selector, delay=3)
+            logger.error(f"Failed to click Post button: {e}")
         
         # Wait for upload confirmation
         logger.info("Waiting for upload confirmation...")
@@ -291,7 +288,9 @@ def _upload_to_tiktok_with_manager(
         
         logger.info("Filling caption")
         try:
-            caption_selector = '[data-e2e="caption-input"]'
+            # Stable selectors: data-e2e attributes are TikTok's test identifiers
+            # Also try role-based contenteditable as fallback
+            caption_selector = '[data-e2e="caption-input"], div[contenteditable="true"][aria-label*="caption"], div[contenteditable="true"]'
             element = page.wait_for_selector(caption_selector, timeout=10000)
             element.click()
             page.keyboard.press("Control+A")
@@ -299,31 +298,33 @@ def _upload_to_tiktok_with_manager(
             for char in full_caption:
                 element.type(char, delay=random.uniform(50, 150))
         except Exception as e:
-            logger.warning(f"Primary caption selector failed, trying alternative: {e}")
-            caption_selector = 'div[contenteditable="true"]'
-            element = page.wait_for_selector(caption_selector, timeout=10000)
-            element.click()
-            page.keyboard.press("Control+A")
-            page.keyboard.press("Backspace")
-            for char in full_caption:
-                element.type(char, delay=random.uniform(50, 150))
+            logger.warning(f"Caption input failed: {e}")
+            # Last resort - try any contenteditable
+            try:
+                caption_selector = 'div[contenteditable="true"]'
+                element = page.wait_for_selector(caption_selector, timeout=10000)
+                element.click()
+                page.keyboard.press("Control+A")
+                page.keyboard.press("Backspace")
+                for char in full_caption:
+                    element.type(char, delay=random.uniform(50, 150))
+            except:
+                logger.error("All caption selectors failed")
         
         page.wait_for_timeout(random.randint(2000, 3000))
         
         # Click Post/Upload button
         logger.info("Clicking Post button")
         try:
-            post_button_selector = '[data-e2e="post-button"]'
+            # Stable selectors: data-e2e + role-based + text fallbacks
+            # TikTok uses div[role="button"] or button elements
+            post_button_selector = '[data-e2e="post-button"], div[role="button"]:has-text("Post"), button:has-text("Post")'
             page.wait_for_selector(post_button_selector, timeout=5000)
             post_button = page.query_selector(post_button_selector)
             post_button.click()
             page.wait_for_timeout(3000)
         except Exception as e:
-            logger.warning(f"Primary post button selector failed, trying alternative: {e}")
-            post_button_selector = 'button:has-text("Post")'
-            post_button = page.wait_for_selector(post_button_selector, timeout=5000)
-            post_button.click()
-            page.wait_for_timeout(3000)
+            logger.error(f"Failed to click Post button: {e}")
         
         # Wait for upload confirmation
         logger.info("Waiting for upload confirmation...")
