@@ -161,7 +161,7 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
     Check if Ollama is running and model is available.
     
     Args:
-        model_name: Name of the Ollama model to check
+        model_name: Name of the Ollama model to check (e.g., "qwen3:8b")
         timeout: Connection timeout in seconds
         endpoint: Ollama endpoint URL
         
@@ -169,6 +169,7 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
         True if Ollama is running and model exists, False otherwise
     """
     if not OLLAMA_AVAILABLE:
+        logger.debug("Ollama SDK not installed")
         return False
     
     try:
@@ -176,23 +177,54 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
         client = ollama.Client(host=endpoint, timeout=timeout)
         
         # List available models
-        models = client.list()
+        response = client.list()
         
-        # Check if our model is available
-        available_models = [m['name'] for m in models.get('models', [])]
+        # Extract model names - handle both 'name' and 'model' fields
+        available_models = []
+        for m in response.get('models', []):
+            # Try both common field names
+            model_id = m.get('name') or m.get('model')
+            if model_id:
+                available_models.append(model_id)
         
-        # Match model name (handle with/without tag)
-        model_base = model_name.split(':')[0]
-        for available in available_models:
-            if available.startswith(model_base):
-                logger.info(f"Ollama is running with model: {available}")
+        # Log all discovered models at DEBUG level
+        logger.debug(f"Ollama detected models: {available_models}")
+        
+        if not available_models:
+            logger.warning("Ollama is running but no models found")
+            return False
+        
+        # Normalize model names for comparison (case-insensitive)
+        model_name_normalized = model_name.lower().strip()
+        available_normalized = [m.lower().strip() for m in available_models]
+        
+        # Strategy 1: Exact match (preferred)
+        if model_name_normalized in available_normalized:
+            matched_model = available_models[available_normalized.index(model_name_normalized)]
+            logger.info(f"Ollama is running with model: {matched_model} (exact match)")
+            return True
+        
+        # Strategy 2: Base name match (e.g., "qwen3:8b" matches "qwen3:*")
+        model_base = model_name_normalized.split(':')[0]
+        for i, available in enumerate(available_normalized):
+            available_base = available.split(':')[0]
+            if available_base == model_base:
+                matched_model = available_models[i]
+                logger.info(f"Ollama is running with model: {matched_model} (base name match for '{model_name}')")
                 return True
         
-        logger.warning(f"Ollama is running but model '{model_name}' not found. Available: {available_models}")
+        # No match found - log available models at INFO level for debugging
+        logger.warning(f"Ollama is running but model '{model_name}' not found.")
+        logger.info(f"Available models: {', '.join(available_models)}")
+        logger.info(f"Tip: Check your config/model.yaml - local_model_name should match one of the above")
         return False
         
+    except ConnectionError as e:
+        logger.debug(f"Ollama connection failed: {e}")
+        return False
     except Exception as e:
-        logger.debug(f"Ollama not available: {e}")
+        logger.warning(f"Ollama availability check failed: {e}")
+        logger.debug(f"Full error: {e}", exc_info=True)
         return False
 
 
