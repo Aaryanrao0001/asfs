@@ -48,8 +48,17 @@ def upload_to_youtube_browser(
         
         # Navigate to YouTube Studio upload
         logger.info("Navigating to YouTube Studio")
-        page.goto("https://studio.youtube.com/", wait_until="networkidle")
-        browser.human_delay(2, 4)
+        try:
+            page.goto("https://studio.youtube.com/", wait_until="domcontentloaded", timeout=60000)
+            browser.human_delay(2, 4)
+        except Exception as e:
+            if "Timeout" in str(e):
+                logger.error("YouTube Studio navigation timed out. Possible causes:")
+                logger.error("  1. Slow internet connection")
+                logger.error("  2. YouTube may be temporarily unavailable")
+                logger.error("  3. Network firewall blocking YouTube")
+                raise Exception(f"YouTube navigation timeout: {e}")
+            raise
         
         # Check if user is logged in
         if "accounts.google.com" in page.url:
@@ -279,8 +288,17 @@ def _upload_to_youtube_with_manager(
         
         # Navigate to YouTube Studio upload
         logger.info("Navigating to YouTube Studio")
-        page.goto("https://studio.youtube.com/", wait_until="networkidle")
-        page.wait_for_timeout(random.randint(2000, 4000))
+        try:
+            page.goto("https://studio.youtube.com/", wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(random.randint(2000, 4000))
+        except Exception as e:
+            if "Timeout" in str(e):
+                logger.error("YouTube Studio navigation timed out. Possible causes:")
+                logger.error("  1. Slow internet connection")
+                logger.error("  2. YouTube may be temporarily unavailable")
+                logger.error("  3. Network firewall blocking YouTube")
+                raise Exception(f"YouTube navigation timeout: {e}")
+            raise
         
         # Check if user is logged in
         if "accounts.google.com" in page.url:

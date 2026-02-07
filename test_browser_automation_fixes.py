@@ -154,9 +154,9 @@ class TestInstagramSelectorFallbacks(unittest.TestCase):
         instagram_path = Path(__file__).parent / "uploaders" / "brave_instagram.py"
         content = instagram_path.read_text(encoding='utf-8')
         
-        # Check for role-based selectors
-        self.assertIn('button[role="button"]', content,
-                     "Missing button role selector")
+        # Check for improved stable selectors (ARIA labels and roles)
+        self.assertIn('svg[aria-label="New post"]', content,
+                     "Missing stable svg[aria-label] selector")
         self.assertIn('div[role="button"]', content,
                      "Missing div role selector")
         
