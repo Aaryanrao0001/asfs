@@ -56,7 +56,7 @@ class PipelineWorker(QThread):
             
             # Import pipeline function
             # We'll import here to avoid circular dependencies and to capture output
-            from main import run_pipeline
+            from pipeline import run_pipeline
             
             # Create a custom logging handler to capture logs
             log_capture = LogCapture(self.log_message)
