@@ -43,8 +43,8 @@ You ONLY optimize for:
 INPUT STRUCTURE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Segment Text: {segment_text}
-Duration: {duration} seconds
+Segment Text: {{SEGMENT_TEXT}}
+Duration: {{DURATION}} seconds
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EVALUATION FRAMEWORK

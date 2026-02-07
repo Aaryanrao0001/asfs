@@ -223,10 +223,12 @@ CRITICAL: You MUST respond with ONLY valid JSON.
     
     for idx, segment in enumerate(segments_to_score):
         try:
-            # Format prompt with segment data
-            prompt = prompt_template.format(
-                segment_text=segment["text"],
-                duration=f"{segment['duration']:.1f}"
+            # Format prompt with segment data using token replacement
+            # This avoids conflicts with JSON braces in the prompt
+            prompt = (
+                prompt_template
+                .replace("{{SEGMENT_TEXT}}", segment["text"])
+                .replace("{{DURATION}}", f"{segment['duration']:.1f}")
             )
             
             # Call AI model
