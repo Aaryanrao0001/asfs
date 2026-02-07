@@ -10,9 +10,15 @@ model:
   api_key: null  # Set via GITHUB_TOKEN env var
   
   # Generation parameters
-  temperature: 0.7
-  max_tokens: 500
+  temperature: 0.2  # Lowered from 0.7 - reduces variance, stabilizes output
+  max_tokens: 1024
   
   # Scoring configuration
   max_segments_to_score: 50
   min_score_threshold: 6.0
+  
+  # Rate limiting and batching (NEW)
+  batch_size: 6  # Segments per API call
+  pre_filter_count: 20  # Max candidates after heuristic filtering
+  inter_request_delay: 1.5  # Seconds between API calls
+  max_cooldown_threshold: 60  # If retry-after > this, stop pipeline

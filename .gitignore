@@ -41,6 +41,7 @@ pipeline.log
 output/
 work/
 clips/
+state/  # Pipeline state files (rate limiting, resumption)
 
 # Audit database
 audit/events.db

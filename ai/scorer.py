@@ -5,6 +5,7 @@ import json
 import re
 import logging
 import time
+import random
 from typing import List, Dict
 from pathlib import Path
 
@@ -147,6 +148,265 @@ def load_prompt_template() -> str:
         return f.read()
 
 
+def create_batch_prompt(segments: List[Dict], prompt_template: str) -> str:
+    """
+    Create a batch scoring prompt for multiple segments.
+    
+    Args:
+        segments: List of segments to score together (batch size is configurable)
+        prompt_template: Base template
+        
+    Returns:
+        Formatted batch prompt
+    """
+    batch_data = []
+    for i, seg in enumerate(segments):
+        batch_data.append({
+            "id": i + 1,
+            "text": seg["text"],
+            "duration": seg["duration"]
+        })
+    
+    batch_prompt = f"""
+Score the following {len(segments)} video segments. Return a JSON array with results for each.
+
+Segments:
+{json.dumps(batch_data, indent=2)}
+
+{prompt_template}
+
+Return format:
+{{
+  "results": [
+    {{
+      "id": 1,
+      "hook_score": 7,
+      "retention_score": 6,
+      "emotion_score": 5,
+      "relatability_score": 4,
+      "completion_score": 6,
+      "platform_fit_score": 5,
+      "final_score": 60,
+      "verdict": "maybe",
+      "key_strengths": ["strength 1", "strength 2"],
+      "key_weaknesses": ["weakness 1"],
+      "first_3_seconds": "exact quote from first 3 seconds",
+      "primary_emotion": "neutral",
+      "optimal_platform": "tiktok"
+    }},
+    ...
+  ]
+}}
+"""
+    return batch_prompt
+
+
+def pre_filter_candidates(candidates: List[Dict], max_count: int = 20) -> List[Dict]:
+    """
+    Pre-filter candidates using heuristics before AI scoring.
+    
+    Criteria:
+    - Duration: 20-60 seconds
+    - High pause density (natural breaks)
+    - Emotional keywords
+    - Sentence density (engagement)
+    
+    Args:
+        candidates: All candidate segments
+        max_count: Maximum to return
+        
+    Returns:
+        Filtered candidates most likely to be viral
+    """
+    EMOTIONAL_KEYWORDS = [
+        'never', 'always', 'nobody', 'everyone', 'shocked', 'crazy', 
+        'insane', 'ruined', 'destroyed', 'unbelievable', 'secret', 
+        'truth', 'lie', 'wrong', 'right', 'mistake', 'regret'
+    ]
+    
+    scored_candidates = []
+    
+    for candidate in candidates:
+        heuristic_score = 0.0
+        text = candidate.get('text', '').lower()
+        duration = candidate.get('duration', 0)
+        
+        # Duration check (20-60s ideal)
+        if 20 <= duration <= 60:
+            heuristic_score += 3.0
+        elif 15 <= duration <= 75:
+            heuristic_score += 1.5
+        
+        # Emotional keywords
+        keyword_count = sum(1 for kw in EMOTIONAL_KEYWORDS if kw in text)
+        heuristic_score += min(keyword_count * 0.5, 3.0)
+        
+        # Sentence density (engagement indicator)
+        sentences = text.count('.') + text.count('!') + text.count('?')
+        if duration > 0:
+            sentence_density = sentences / (duration / 10)  # Sentences per 10s
+            heuristic_score += min(sentence_density * 0.8, 2.0)
+        
+        # Pause density (from metadata if available)
+        pause_density = candidate.get('pause_density', 0)
+        heuristic_score += min(pause_density * 2.0, 2.0)
+        
+        scored_candidates.append({
+            **candidate,
+            'heuristic_score': heuristic_score
+        })
+    
+    # Sort by heuristic score and return top N
+    scored_candidates.sort(key=lambda x: x['heuristic_score'], reverse=True)
+    return scored_candidates[:max_count]
+
+
+def save_pipeline_state(scored_segments: List[Dict], remaining_segments: List[Dict], output_path: str = "state/pipeline_state.json"):
+    """Save pipeline state when rate limited."""
+    import os
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    state = {
+        'timestamp': time.time(),
+        'scored_segments': scored_segments,
+        'remaining_segments': remaining_segments,
+        'reason': 'rate_limit_exceeded'
+    }
+    
+    with open(output_path, 'w') as f:
+        json.dump(state, f, indent=2)
+    
+    logger.info(f"Pipeline state saved to {output_path}")
+
+
+def extract_retry_after(api_error) -> int:
+    """
+    Extract retry-after value from API error response.
+    
+    Args:
+        api_error: Exception from API call
+        
+    Returns:
+        Retry-after value in seconds, or None if not found
+    """
+    retry_after = None
+    
+    # Try to get from response headers (standard HTTP header)
+    if hasattr(api_error, 'response') and hasattr(api_error.response, 'headers'):
+        retry_after_header = api_error.response.headers.get('retry-after') or \
+                           api_error.response.headers.get('Retry-After')
+        if retry_after_header:
+            try:
+                retry_after = int(retry_after_header)
+            except (ValueError, TypeError):
+                pass
+    
+    # Fallback: try direct attribute (some SDKs may expose it directly)
+    if retry_after is None:
+        retry_after = getattr(api_error, 'retry_after', None)
+    
+    return retry_after
+
+
+def process_single_segment_response(segment: Dict, ai_analysis: Dict, idx: int) -> Dict:
+    """
+    Process AI analysis for a single segment and create scored segment.
+    
+    Args:
+        segment: Original segment data
+        ai_analysis: Parsed AI response
+        idx: Segment index for logging
+        
+    Returns:
+        Scored segment dictionary
+    """
+    try:
+        # Extract scores safely with fallbacks
+        hook_score = extract_score_safe(ai_analysis, "hook_score", 0.0)
+        retention_score = extract_score_safe(ai_analysis, "retention_score", 0.0)
+        emotion_score = extract_score_safe(ai_analysis, "emotion_score", 0.0)
+        relatability_score = extract_score_safe(ai_analysis, "relatability_score", 0.0)
+        completion_score = extract_score_safe(ai_analysis, "completion_score", 0.0)
+        platform_fit_score = extract_score_safe(ai_analysis, "platform_fit_score", 0.0)
+        
+        # Extract final score with fallback calculation
+        final_score = extract_score_safe(ai_analysis, "final_score", None)
+        
+        # If final_score not provided, calculate weighted average
+        if final_score is None:
+            final_score = (
+                hook_score * 0.35 +
+                retention_score * 0.25 +
+                emotion_score * 0.20 +
+                completion_score * 0.10 +
+                platform_fit_score * 0.05 +
+                relatability_score * 0.05
+            ) * 10.0  # Scale from 0-10 to 0-100
+        
+        # Convert final_score (0-100) to overall_score (0-10)
+        overall_score = final_score / 10.0
+        verdict = ai_analysis.get("verdict", "skip")
+        
+        scored_segment = {
+            **segment,
+            "ai_analysis": ai_analysis,
+            "overall_score": overall_score,
+            "hook_score": hook_score,
+            "retention_score": retention_score,
+            "emotion_score": emotion_score,
+            "relatability_score": relatability_score,
+            "completion_score": completion_score,
+            "platform_fit_score": platform_fit_score,
+            "final_score": final_score,
+            "verdict": verdict,
+            "key_strengths": ai_analysis.get("key_strengths", []),
+            "key_weaknesses": ai_analysis.get("key_weaknesses", []),
+            "first_3_seconds": ai_analysis.get("first_3_seconds", ""),
+            "primary_emotion": ai_analysis.get("primary_emotion", "neutral"),
+            "optimal_platform": ai_analysis.get("optimal_platform", "none")
+        }
+        
+        logger.info(f"[OK] Segment {idx + 1}: final_score={final_score:.1f}/100, verdict={verdict}")
+        return scored_segment
+        
+    except Exception as e:
+        logger.error(f"Failed to process segment {idx + 1} response: {e}")
+        return create_fallback_segment(segment)
+
+
+def create_fallback_segment(segment: Dict) -> Dict:
+    """
+    Create a fallback segment with zero scores when AI analysis fails.
+    
+    Args:
+        segment: Original segment data
+        
+    Returns:
+        Segment with default scores
+    """
+    return {
+        **segment,
+        "ai_analysis": {
+            "error": "AI analysis failed",
+            "final_score": 0
+        },
+        "overall_score": 0.0,
+        "final_score": 0,
+        "verdict": "skip",
+        "hook_score": 0,
+        "retention_score": 0,
+        "emotion_score": 0,
+        "relatability_score": 0,
+        "completion_score": 0,
+        "platform_fit_score": 0,
+        "key_strengths": [],
+        "key_weaknesses": ["AI analysis failed"],
+        "first_3_seconds": "",
+        "primary_emotion": "neutral",
+        "optimal_platform": "none"
+    }
+
+
 def score_segments(
     candidates: List[Dict],
     model_config: Dict,
@@ -182,6 +442,12 @@ def score_segments(
     
     # Load prompt template
     prompt_template = load_prompt_template()
+    
+    # Pre-filter candidates using heuristics
+    pre_filter_count = model_config.get('pre_filter_count', 20)
+    logger.info(f"Pre-filtering {len(candidates)} candidates using heuristics")
+    candidates = pre_filter_candidates(candidates, max_count=pre_filter_count)
+    logger.info(f"After pre-filtering: {len(candidates)} candidates remain")
     
     # Limit to max_segments (score best candidates based on duration and position)
     segments_to_score = candidates[:max_segments] if len(candidates) > max_segments else candidates
@@ -222,194 +488,255 @@ CRITICAL: You MUST respond with ONLY valid JSON.
 - Do NOT include any text before or after the JSON
 - Start directly with { and end with }"""
     
-    for idx, segment in enumerate(segments_to_score):
-        try:
-            # Format prompt with segment data using token replacement
-            # This avoids conflicts with JSON braces in the prompt
-            prompt = (
-                prompt_template
-                .replace("{{SEGMENT_TEXT}}", segment["text"])
-                .replace("{{DURATION}}", f"{segment['duration']:.1f}")
-            )
+    # API usage tracking
+    api_calls_made = 0
+    tokens_used = 0
+    
+    # Get batch size and other config
+    BATCH_SIZE = model_config.get('batch_size', 6)  # Process 6 segments per API call
+    inter_request_delay = model_config.get('inter_request_delay', 1.5)
+    max_cooldown_threshold = model_config.get('max_cooldown_threshold', 60)
+    
+    # Process segments in batches
+    for batch_start in range(0, len(segments_to_score), BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, len(segments_to_score))
+        batch_segments = segments_to_score[batch_start:batch_end]
+        
+        # For single segment, use original logic; for multiple, use batch
+        if len(batch_segments) == 1:
+            segment = batch_segments[0]
+            idx = batch_start
             
-            # Call AI model with retry logic (1 retry on API failures)
-            ai_response = None
-            api_call_succeeded = False
-            max_retries = 1
-            
-            for attempt in range(max_retries + 1):
-                try:
-                    if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
-                        response = client.complete(
-                            messages=[
-                                {"role": "system", "content": system_message},
-                                {"role": "user", "content": prompt}
-                            ],
-                            model=model_name,
-                            temperature=0.7,
-                            max_tokens=1024,
-                            response_format={"type": "json_object"}
-                        )
-                        
-                        ai_response = response.choices[0].message.content
-                        
-                    else:  # OpenAI SDK
-                        response = client.chat.completions.create(
-                            model=model_name,
-                            messages=[
-                                {"role": "system", "content": system_message},
-                                {"role": "user", "content": prompt}
-                            ],
-                            temperature=0.7,
-                            max_tokens=1024,
-                            response_format={"type": "json_object"}
-                        )
-                        
-                        ai_response = response.choices[0].message.content
-                    
-                    # API call succeeded
-                    api_call_succeeded = True
-                    break
-                    
-                except Exception as api_error:
-                    if attempt < max_retries:
-                        logger.warning(f"API call failed for segment {idx + 1}, retrying... ({api_error})")
-                        time.sleep(2)  # Brief delay before retry
-                    else:
-                        logger.error(f"API call failed for segment {idx + 1} after {max_retries + 1} attempts: {api_error}")
-                        raise  # Re-raise to be caught by outer exception handler
-            
-            if not api_call_succeeded or ai_response is None:
-                raise RuntimeError("API call failed and no response received")
-            
-            # Log raw output for first segment at INFO level, others at DEBUG
-            if idx == 0:
-                logger.info(f"Raw model output for first segment (first 300 chars): {ai_response[:300]}")
-            else:
-                logger.debug(f"Raw model output (first 200 chars): {ai_response[:200]}")
-            
-            # Parse AI response using extract_json_safe
             try:
-                ai_analysis = extract_json_safe(ai_response)
-                # Log parse success only for first segment to avoid excessive output
+                # Format prompt with segment data using token replacement
+                prompt = (
+                    prompt_template
+                    .replace("{{SEGMENT_TEXT}}", segment["text"])
+                    .replace("{{DURATION}}", f"{segment['duration']:.1f}")
+                )
+                
+                # Call AI model with retry logic
+                ai_response = None
+                api_call_succeeded = False
+                max_retries = 1
+                
+                for attempt in range(max_retries + 1):
+                    try:
+                        if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
+                            response = client.complete(
+                                messages=[
+                                    {"role": "system", "content": system_message},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                model=model_name,
+                                temperature=0.2,  # Changed from 0.7 - reduces variance, stabilizes output
+                                max_tokens=1024,
+                                response_format={"type": "json_object"}
+                            )
+                            
+                            ai_response = response.choices[0].message.content
+                            
+                            # Track token usage
+                            if hasattr(response, 'usage'):
+                                tokens_used += response.usage.total_tokens
+                            
+                        else:  # OpenAI SDK
+                            response = client.chat.completions.create(
+                                model=model_name,
+                                messages=[
+                                    {"role": "system", "content": system_message},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=0.2,  # Changed from 0.7 - reduces variance, stabilizes output
+                                max_tokens=1024,
+                                response_format={"type": "json_object"}
+                            )
+                            
+                            ai_response = response.choices[0].message.content
+                            
+                            # Track token usage
+                            if hasattr(response, 'usage'):
+                                tokens_used += response.usage.total_tokens
+                        
+                        # API call succeeded
+                        api_call_succeeded = True
+                        api_calls_made += 1
+                        logger.info(f"API call {api_calls_made}: 1 segment, {tokens_used} tokens used so far")
+                        
+                        # Add inter-request delay to prevent rapid-fire requests
+                        if batch_start > 0:  # Skip delay for first request
+                            time.sleep(inter_request_delay)
+                        
+                        break
+                        
+                    except Exception as api_error:
+                        # Check if it's a 429 rate limit error
+                        if hasattr(api_error, 'status_code') and api_error.status_code == 429:
+                            # Extract retry-after from headers
+                            retry_after = extract_retry_after(api_error)
+                            if retry_after and retry_after > max_cooldown_threshold:
+                                logger.error(f"Rate limit exceeded with long cooldown ({retry_after}s). Stopping scoring.")
+                                # Save state
+                                remaining = segments_to_score[idx:]
+                                save_pipeline_state(scored_segments, remaining)
+                                return scored_segments
+                            
+                            # Add jitter to prevent thundering herd
+                            sleep_time = (retry_after or 10) + random.uniform(1, 5)
+                            logger.warning(f"Rate limited. Sleeping for {sleep_time:.1f}s")
+                            time.sleep(sleep_time)
+                            continue
+                        
+                        if attempt < max_retries:
+                            backoff = min(300, (2 ** attempt) + random.uniform(0, 1))
+                            logger.warning(f"API call failed for segment {idx + 1}, retrying in {backoff:.1f}s... ({api_error})")
+                            time.sleep(backoff)
+                        else:
+                            logger.error(f"API call failed for segment {idx + 1} after {max_retries + 1} attempts: {api_error}")
+                            raise
+                
+                if not api_call_succeeded or ai_response is None:
+                    raise RuntimeError("API call failed and no response received")
+                
+                # Log raw output for first segment
                 if idx == 0:
-                    logger.info(f"[OK] JSON parsed successfully for segment {idx + 1}")
-            except ValueError as e:
-                logger.warning(f"[FAIL] Failed to parse AI response as JSON for segment {idx + 1}: {e}")
-                logger.warning(f"Response preview: {ai_response[:300]}")
-                # Create default analysis (new format)
-                ai_analysis = {
-                    "hook_score": 0,
-                    "retention_score": 0,
-                    "emotion_score": 0,
-                    "relatability_score": 0,
-                    "completion_score": 0,
-                    "platform_fit_score": 0,
-                    "final_score": 0,
-                    "verdict": "skip",
-                    "key_strengths": [],
-                    "key_weaknesses": ["AI analysis failed - Unable to parse response"],
-                    "first_3_seconds": segment["text"][:100] if segment.get("text") else "",
-                    "primary_emotion": "neutral",
-                    "optimal_platform": "none"
-                }
-            
-            # Map new format to existing structure for backward compatibility
-            # Check if using new format (direct keys) or old format (nested)
-            if "hook_score" in ai_analysis or "scores" in ai_analysis:
-                # Extract scores safely with fallbacks
-                hook_score = extract_score_safe(ai_analysis, "hook_score", 0.0)
-                retention_score = extract_score_safe(ai_analysis, "retention_score", 0.0)
-                emotion_score = extract_score_safe(ai_analysis, "emotion_score", 0.0)
-                relatability_score = extract_score_safe(ai_analysis, "relatability_score", 0.0)
-                completion_score = extract_score_safe(ai_analysis, "completion_score", 0.0)
-                platform_fit_score = extract_score_safe(ai_analysis, "platform_fit_score", 0.0)
+                    logger.info(f"Raw model output for first segment (first 300 chars): {ai_response[:300]}")
+                else:
+                    logger.debug(f"Raw model output (first 200 chars): {ai_response[:200]}")
                 
-                # Extract final score with fallback calculation
-                # Check if final_score was explicitly provided in the response
-                final_score = extract_score_safe(ai_analysis, "final_score", None)
+                # Parse and process single segment response
+                ai_analysis = extract_json_safe(ai_response)
+                scored_segment = process_single_segment_response(segment, ai_analysis, idx)
+                scored_segments.append(scored_segment)
                 
-                # If final_score not provided, calculate weighted average from individual scores
-                # Individual scores are expected to be on 0-10 scale, final_score on 0-100 scale
-                # Weights are defined in prompt.txt and must sum to 1.0:
-                # hook (35%) + retention (25%) + emotion (20%) + completion (10%) + platform_fit (5%) + relatability (5%) = 100%
-                if final_score is None:
-                    final_score = (
-                        hook_score * 0.35 +
-                        retention_score * 0.25 +
-                        emotion_score * 0.20 +
-                        completion_score * 0.10 +  # Fixed from 0.15 to match prompt.txt
-                        platform_fit_score * 0.05 +
-                        relatability_score * 0.05
-                    ) * 10.0  # Scale from 0-10 range to 0-100 range
-                elif final_score == 0.0 and not any([hook_score, retention_score, emotion_score]):
-                    # If final_score is explicitly 0 and all other scores are also 0, keep it as 0
-                    pass
-                # Otherwise use the provided final_score as-is
+            except Exception as e:
+                logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
+                scored_segments.append(create_fallback_segment(segment))
+        
+        else:
+            # Batch processing for multiple segments
+            try:
+                # Create batch prompt
+                batch_prompt = create_batch_prompt(batch_segments, prompt_template)
                 
-                # Convert final_score (0-100) to overall_score (0-10) for compatibility
-                overall_score = final_score / 10.0
-                verdict = ai_analysis.get("verdict", "skip")
+                # Call AI model with retry logic
+                ai_response = None
+                api_call_succeeded = False
+                max_retries = 1
                 
-                scored_segment = {
-                    **segment,
-                    "ai_analysis": ai_analysis,
-                    "overall_score": overall_score,
-                    "hook_score": hook_score,
-                    "retention_score": retention_score,
-                    "emotion_score": emotion_score,
-                    "relatability_score": relatability_score,
-                    "completion_score": completion_score,
-                    "platform_fit_score": platform_fit_score,
-                    "final_score": final_score,
-                    "verdict": verdict,
-                    "key_strengths": ai_analysis.get("key_strengths", []),
-                    "key_weaknesses": ai_analysis.get("key_weaknesses", []),
-                    "first_3_seconds": ai_analysis.get("first_3_seconds", ""),
-                    "primary_emotion": ai_analysis.get("primary_emotion", "neutral"),
-                    "optimal_platform": ai_analysis.get("optimal_platform", "none")
-                }
+                for attempt in range(max_retries + 1):
+                    try:
+                        if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
+                            response = client.complete(
+                                messages=[
+                                    {"role": "system", "content": system_message},
+                                    {"role": "user", "content": batch_prompt}
+                                ],
+                                model=model_name,
+                                temperature=0.2,  # Changed from 0.7
+                                max_tokens=4096,  # Larger for batch responses
+                                response_format={"type": "json_object"}
+                            )
+                            
+                            ai_response = response.choices[0].message.content
+                            
+                            # Track token usage
+                            if hasattr(response, 'usage'):
+                                tokens_used += response.usage.total_tokens
+                            
+                        else:  # OpenAI SDK
+                            response = client.chat.completions.create(
+                                model=model_name,
+                                messages=[
+                                    {"role": "system", "content": system_message},
+                                    {"role": "user", "content": batch_prompt}
+                                ],
+                                temperature=0.2,  # Changed from 0.7
+                                max_tokens=4096,  # Larger for batch responses
+                                response_format={"type": "json_object"}
+                            )
+                            
+                            ai_response = response.choices[0].message.content
+                            
+                            # Track token usage
+                            if hasattr(response, 'usage'):
+                                tokens_used += response.usage.total_tokens
+                        
+                        # API call succeeded
+                        api_call_succeeded = True
+                        api_calls_made += 1
+                        logger.info(f"API call {api_calls_made}: {len(batch_segments)} segments, {tokens_used} tokens used so far")
+                        
+                        # Add inter-request delay
+                        if batch_start > 0:
+                            time.sleep(inter_request_delay)
+                        
+                        break
+                        
+                    except Exception as api_error:
+                        # Check if it's a 429 rate limit error
+                        if hasattr(api_error, 'status_code') and api_error.status_code == 429:
+                            retry_after = extract_retry_after(api_error)
+                            if retry_after and retry_after > max_cooldown_threshold:
+                                logger.error(f"Rate limit exceeded with long cooldown ({retry_after}s). Stopping scoring.")
+                                remaining = segments_to_score[batch_start:]
+                                save_pipeline_state(scored_segments, remaining)
+                                return scored_segments
+                            
+                            sleep_time = (retry_after or 10) + random.uniform(1, 5)
+                            logger.warning(f"Rate limited. Sleeping for {sleep_time:.1f}s")
+                            time.sleep(sleep_time)
+                            continue
+                        
+                        if attempt < max_retries:
+                            backoff = min(300, (2 ** attempt) + random.uniform(0, 1))
+                            logger.warning(f"API call failed for batch starting at {batch_start + 1}, retrying in {backoff:.1f}s... ({api_error})")
+                            time.sleep(backoff)
+                        else:
+                            logger.error(f"API call failed for batch after {max_retries + 1} attempts: {api_error}")
+                            raise
                 
-                logger.info(f"[OK] Segment {idx + 1}: final_score={final_score:.1f}/100, verdict={verdict}")
-            else:
-                # Old format fallback (nested scores) - shouldn't happen with new prompt
-                scores = ai_analysis.get("scores", {})
-                overall_score = ai_analysis.get("overall_score", 0.0)
+                if not api_call_succeeded or ai_response is None:
+                    raise RuntimeError("API call failed and no response received")
                 
-                scored_segment = {
-                    **segment,
-                    "ai_analysis": ai_analysis,
-                    "overall_score": overall_score,
-                    "scores": scores,
-                    "recommendation": ai_analysis.get("recommendation", "AVERAGE")
-                }
+                # Parse batch response
+                batch_analysis = extract_json_safe(ai_response)
                 
-                logger.info(f"Scored segment {idx + 1}/{len(segments_to_score)}: "
-                           f"{overall_score:.1f}/10 "
-                           f"({ai_analysis.get('recommendation', 'UNKNOWN')})")
-            
-            scored_segments.append(scored_segment)
-            
-        except Exception as e:
-            logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
-            # Add fallback with zero scores
-            # Note: final_score appears both in ai_analysis and top-level for backward compatibility
-            scored_segments.append({
-                **segment,
-                "ai_analysis": {
-                    "error": str(e),
-                    "final_score": 0
-                },
-                "overall_score": 0.0,
-                "final_score": 0,  # Top-level for easy access
-                "verdict": "skip",
-                "hook_score": 0,
-                "retention_score": 0,
-                "emotion_score": 0,
-                "relatability_score": 0,
-                "completion_score": 0,
-                "platform_fit_score": 0
-            })
+                # Extract results array
+                results = batch_analysis.get('results', [])
+                
+                if not results:
+                    logger.warning("Batch response missing 'results' array, falling back to individual parsing")
+                    # Fallback: try to treat as single response
+                    results = [batch_analysis]
+                
+                # Process each result and match to original segments
+                for i, segment in enumerate(batch_segments):
+                    idx = batch_start + i
+                    
+                    # Find matching result by id
+                    result = None
+                    for r in results:
+                        if r.get('id') == i + 1:
+                            result = r
+                            break
+                    
+                    if result is None and i < len(results):
+                        # Fallback: use positional matching
+                        result = results[i]
+                    
+                    if result:
+                        scored_segment = process_single_segment_response(segment, result, idx)
+                        scored_segments.append(scored_segment)
+                    else:
+                        logger.warning(f"No result found for segment {idx + 1} in batch")
+                        scored_segments.append(create_fallback_segment(segment))
+                
+            except Exception as e:
+                logger.error(f"Failed to score batch starting at {batch_start + 1}: {str(e)}")
+                # Add fallback for all segments in batch
+                for i, segment in enumerate(batch_segments):
+                    scored_segments.append(create_fallback_segment(segment))
     
     # Sort by overall score (highest first)
     scored_segments.sort(key=lambda x: x.get("overall_score", 0), reverse=True)
