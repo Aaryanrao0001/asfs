@@ -18,7 +18,8 @@ def upload_to_tiktok_browser(
     description: str,
     tags: str,
     brave_path: Optional[str] = None,
-    profile_path: Optional[str] = None
+    user_data_dir: Optional[str] = None,
+    profile_directory: str = "Default"
 ) -> Optional[str]:
     """
     Upload video to TikTok via Brave browser automation.
@@ -29,7 +30,8 @@ def upload_to_tiktok_browser(
         description: Video description
         tags: Space-separated tags (e.g., "#viral #trending")
         brave_path: Path to Brave executable (optional, auto-detect)
-        profile_path: Path to Brave profile to reuse login (optional)
+        user_data_dir: Path to Brave user data directory (optional, for login session reuse)
+        profile_directory: Profile directory name (e.g., "Default", "Profile 1")
         
     Returns:
         Success message if upload completed, None if failed
@@ -40,7 +42,7 @@ def upload_to_tiktok_browser(
     logger.info("Starting TikTok browser upload")
     
     try:
-        browser = BraveBrowserBase(brave_path, profile_path)
+        browser = BraveBrowserBase(brave_path, user_data_dir, profile_directory)
         page = browser.launch(headless=False)
         
         # Navigate to TikTok upload page
@@ -166,7 +168,8 @@ def upload_to_tiktok(
     """
     # Extract browser settings from credentials
     brave_path = credentials.get("brave_path")
-    profile_path = credentials.get("brave_profile_path")
+    user_data_dir = credentials.get("brave_user_data_dir")
+    profile_directory = credentials.get("brave_profile_directory", "Default")
     
     # Format hashtags
     tags = " ".join(hashtags) if hashtags else ""
@@ -178,5 +181,6 @@ def upload_to_tiktok(
         description=caption,
         tags=tags,
         brave_path=brave_path,
-        profile_path=profile_path
+        user_data_dir=user_data_dir,
+        profile_directory=profile_directory
     )

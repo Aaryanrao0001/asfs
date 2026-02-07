@@ -27,18 +27,32 @@ class BraveBrowserBase:
         "linux": "/usr/bin/brave-browser"
     }
     
-    def __init__(self, brave_path: Optional[str] = None, profile_path: Optional[str] = None):
+    DEFAULT_USER_DATA_DIRS = {
+        "win32": os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\User Data"),
+        "darwin": os.path.expanduser("~/Library/Application Support/BraveSoftware/Brave-Browser"),
+        "linux": os.path.expanduser("~/.config/BraveSoftware/Brave-Browser")
+    }
+    
+    def __init__(
+        self, 
+        brave_path: Optional[str] = None, 
+        user_data_dir: Optional[str] = None,
+        profile_directory: str = "Default"
+    ):
         """
         Initialize Brave browser automation.
         
         Args:
             brave_path: Path to Brave executable (default: auto-detect)
-            profile_path: Path to Brave user data directory (optional)
+            user_data_dir: Path to Brave user data directory (e.g., C:\\Users\\user\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data)
+            profile_directory: Profile directory name (e.g., "Default", "Profile 1", "Profile 2")
         """
         self.brave_path = brave_path or self._detect_brave_path()
-        self.profile_path = profile_path
+        self.user_data_dir = user_data_dir
+        self.profile_directory = profile_directory
         self.playwright: Optional[Playwright] = None
-        self.browser: Optional[Browser] = None
+        self.browser: Optional[Browser] = None  # For fallback mode without user_data_dir
+        self.context = None  # Changed from browser to context for persistent context
         self.page: Optional[Page] = None
         
         if not self.brave_path or not os.path.exists(self.brave_path):
@@ -46,6 +60,10 @@ class BraveBrowserBase:
                 f"Brave browser not found at: {self.brave_path}\n"
                 "Please install Brave or specify the correct path."
             )
+        
+        # Validate profile exists if user_data_dir is specified
+        if self.user_data_dir:
+            self._validate_profile()
     
     def _detect_brave_path(self) -> str:
         """Auto-detect Brave browser executable path."""
@@ -92,12 +110,69 @@ class BraveBrowserBase:
         # Return empty string if not found (will raise error in __init__)
         return ""
     
+    def _validate_profile(self):
+        """
+        Validate that the profile directory exists.
+        
+        Raises:
+            RuntimeError: If profile directory is missing
+        """
+        if not self.user_data_dir:
+            return
+        
+        profile_full_path = os.path.join(self.user_data_dir, self.profile_directory)
+        
+        if not os.path.exists(self.user_data_dir):
+            raise RuntimeError(
+                f"Brave user data directory not found: {self.user_data_dir}\n"
+                f"Please specify a valid Brave user data directory path.\n"
+                f"Example (Windows): C:\\Users\\<USER>\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data"
+            )
+        
+        if not os.path.exists(profile_full_path):
+            raise RuntimeError(
+                f"Brave profile not found: {profile_full_path}\n"
+                f"User Data Dir: {self.user_data_dir}\n"
+                f"Profile Directory: {self.profile_directory}\n\n"
+                f"Use an existing logged-in profile. Temp profiles are NOT allowed.\n"
+                f"Available profiles in user data dir:\n" +
+                "\n".join([f"  - {d}" for d in os.listdir(self.user_data_dir) 
+                          if os.path.isdir(os.path.join(self.user_data_dir, d)) 
+                          and (d == "Default" or d.startswith("Profile"))])
+            )
+    
+    @staticmethod
+    def get_available_profiles(user_data_dir: str) -> list:
+        """
+        Get list of available profile directories in user data dir.
+        
+        Args:
+            user_data_dir: Path to Brave user data directory
+            
+        Returns:
+            List of profile directory names (e.g., ["Default", "Profile 1", "Profile 2"])
+        """
+        if not os.path.exists(user_data_dir):
+            return []
+        
+        profiles = []
+        for item in os.listdir(user_data_dir):
+            item_path = os.path.join(user_data_dir, item)
+            if os.path.isdir(item_path) and (item == "Default" or item.startswith("Profile")):
+                profiles.append(item)
+        
+        return sorted(profiles)
+    
     def launch(self, headless: bool = False) -> Page:
         """
-        Launch Brave browser and return page.
+        Launch Brave browser using persistent context and return page.
+        
+        CRITICAL: Uses launch_persistent_context() to maintain real profile sessions.
+        This is required for Google login and other platform authentications.
         
         Args:
             headless: Run in headless mode (default: False, browser visible)
+                     NOTE: headless=True will break Google login - use only for testing
             
         Returns:
             Playwright Page object
@@ -106,28 +181,57 @@ class BraveBrowserBase:
         
         self.playwright = sync_playwright().start()
         
-        # Build launch arguments
-        launch_args = []
+        # Build launch arguments for anti-detection
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",  # Hide automation
+            "--no-first-run",  # Skip first run wizard
+            "--no-default-browser-check",  # Skip default browser prompt
+        ]
         
-        # Add user data directory if specified (reuse existing profile)
-        if self.profile_path:
-            launch_args.append(f"--user-data-dir={self.profile_path}")
-            logger.info(f"Using profile: {self.profile_path}")
+        # Add profile directory if using persistent context
+        if self.user_data_dir:
+            launch_args.append(f"--profile-directory={self.profile_directory}")
+            logger.info(f"Using User Data Dir: {self.user_data_dir}")
+            logger.info(f"Using Profile Directory: {self.profile_directory}")
         
-        # Launch Brave with Chromium driver
-        self.browser = self.playwright.chromium.launch(
-            executable_path=self.brave_path,
-            headless=headless,
-            args=launch_args
-        )
+        # CRITICAL: Use launch_persistent_context() to reuse real profile
+        # This is the ONLY way to maintain login sessions (Google, TikTok, etc.)
+        if self.user_data_dir:
+            # Persistent context with real profile
+            self.context = self.playwright.chromium.launch_persistent_context(
+                user_data_dir=self.user_data_dir,
+                executable_path=self.brave_path,
+                headless=headless,
+                args=launch_args,
+                viewport={"width": 1280, "height": 720},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            
+            # Get or create page
+            if len(self.context.pages) > 0:
+                self.page = self.context.pages[0]
+            else:
+                self.page = self.context.new_page()
+        else:
+            # Fallback: regular launch without profile (will create temp profile)
+            logger.warning(
+                "No user_data_dir specified - using temporary profile.\n"
+                "This may cause login failures on Google and other platforms.\n"
+                "Specify user_data_dir and profile_directory for production use."
+            )
+            self.browser = self.playwright.chromium.launch(
+                executable_path=self.brave_path,
+                headless=headless,
+                args=launch_args
+            )
+            
+            self.context = self.browser.new_context(
+                viewport={"width": 1280, "height": 720},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            
+            self.page = self.context.new_page()
         
-        # Create a new page
-        context = self.browser.new_context(
-            viewport={"width": 1280, "height": 720},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        
-        self.page = context.new_page()
         logger.info("Brave browser launched successfully")
         
         return self.page
@@ -136,7 +240,9 @@ class BraveBrowserBase:
         """Close browser and cleanup."""
         if self.page:
             self.page.close()
-        if self.browser:
+        if self.context:
+            self.context.close()
+        if self.browser:  # For fallback mode
             self.browser.close()
         if self.playwright:
             self.playwright.stop()
