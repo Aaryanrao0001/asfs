@@ -6,6 +6,7 @@ import re
 import logging
 import time
 import random
+import requests
 from typing import List, Dict
 from pathlib import Path
 
@@ -160,6 +161,8 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
     """
     Check if Ollama is running and model is available.
     
+    Uses the stable HTTP API (/api/tags) instead of the SDK for discovery.
+    
     Args:
         model_name: Name of the Ollama model to check (e.g., "qwen3:8b")
         timeout: Connection timeout in seconds
@@ -168,20 +171,19 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
     Returns:
         True if Ollama is running and model exists, False otherwise
     """
-    if not OLLAMA_AVAILABLE:
-        logger.debug("Ollama SDK not installed")
-        return False
-    
     try:
-        # Quick health check with timeout
-        client = ollama.Client(host=endpoint, timeout=timeout)
+        # Use HTTP API for stable model discovery
+        tags_url = f"{endpoint}/api/tags"
+        response = requests.get(tags_url, timeout=timeout)
+        response.raise_for_status()
         
-        # List available models
-        response = client.list()
+        # Parse JSON response - stable format: {"models": [...]}
+        data = response.json()
+        models_list = data.get("models", [])
         
         # Extract model names - handle both 'name' and 'model' fields
         available_models = []
-        for m in response.get('models', []):
+        for m in models_list:
             # Try both common field names
             model_id = m.get('name') if m.get('name') is not None else m.get('model')
             if model_id:
@@ -220,8 +222,15 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
         logger.info(f"Tip: Check your config/model.yaml - local_model_name should match one of the above")
         return False
         
-    except ConnectionError as e:
+    except requests.exceptions.ConnectionError as e:
         logger.debug(f"Ollama connection failed: {e}")
+        return False
+    except requests.exceptions.Timeout as e:
+        logger.debug(f"Ollama connection timeout: {e}")
+        return False
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Ollama availability check failed: {e}")
+        logger.debug("Full error details:", exc_info=True)
         return False
     except Exception as e:
         logger.warning(f"Ollama availability check failed: {e}")
@@ -250,8 +259,11 @@ def score_with_ollama(
         Parsed AI analysis dictionary
         
     Raises:
-        Exception: If Ollama call fails
+        Exception: If Ollama call fails or SDK is not available
     """
+    if not OLLAMA_AVAILABLE:
+        raise RuntimeError("Ollama SDK not available. Install ollama package for local inference.")
+    
     client = ollama.Client(host=endpoint)
     
     # Call Ollama API
