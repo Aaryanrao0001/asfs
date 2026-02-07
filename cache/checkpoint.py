@@ -259,4 +259,15 @@ class PipelineCache:
             logger.info("AI scoring cache invalidated: threshold changed")
             return True
         
+        # Check if all cached scores are zero (indicates failed scoring)
+        scored_segments = state.get("ai_scoring", {}).get("scored_segments", [])
+        if scored_segments:
+            all_zero = all(
+                seg.get("overall_score", 0) == 0 and seg.get("final_score", 0) == 0
+                for seg in scored_segments
+            )
+            if all_zero:
+                logger.info("AI scoring cache invalidated: all cached scores are 0 (likely failed scoring)")
+                return True
+        
         return False
