@@ -88,8 +88,8 @@ class PipelineCache:
             with open(cache_path, 'r', encoding='utf-8') as f:
                 state = json.load(f)
             
-            logger.info(f"✓ Found cached state from {state.get('last_updated', 'unknown time')}")
-            logger.info(f"✓ Last completed stage: {state.get('last_stage', 'none')}")
+            logger.info(f"[OK] Found cached state from {state.get('last_updated', 'unknown time')}")
+            logger.info(f"[OK] Last completed stage: {state.get('last_stage', 'none')}")
             
             return state
             
@@ -115,10 +115,45 @@ class PipelineCache:
             state['last_updated'] = datetime.now().isoformat()
             state['video_path'] = os.path.abspath(video_path)
             
+            # Store output file metadata if available
+            if stage in state and 'transcript_path' in state[stage]:
+                output_path = state[stage]['transcript_path']
+                if os.path.exists(output_path):
+                    if 'outputs' not in state:
+                        state['outputs'] = {}
+                    
+                    state['outputs'][stage] = {
+                        'path': str(output_path),
+                        'size': os.path.getsize(output_path),
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    # For transcript, store segment count
+                    if stage == 'transcription' and output_path.endswith('.json'):
+                        try:
+                            with open(output_path, 'r', encoding='utf-8') as f:
+                                transcript_data = json.load(f)
+                                state['outputs'][stage]['segments'] = len(transcript_data.get("segments", []))
+                        except Exception:
+                            pass
+            
+            # Store audio output metadata
+            elif stage in state and 'audio_path' in state[stage]:
+                output_path = state[stage]['audio_path']
+                if os.path.exists(output_path):
+                    if 'outputs' not in state:
+                        state['outputs'] = {}
+                    
+                    state['outputs'][stage] = {
+                        'path': str(output_path),
+                        'size': os.path.getsize(output_path),
+                        'timestamp': datetime.now().isoformat()
+                    }
+            
             with open(cache_path, 'w', encoding='utf-8') as f:
                 json.dump(state, f, indent=2, ensure_ascii=False)
             
-            logger.debug(f"✓ Cached state after stage: {stage}")
+            logger.debug(f"[OK] Cached state after stage: {stage}")
             
         except Exception as e:
             logger.warning(f"Failed to save cache: {e}")
@@ -136,7 +171,7 @@ class PipelineCache:
             
             if os.path.exists(cache_path):
                 os.remove(cache_path)
-                logger.info("✓ Cache cleared")
+                logger.info("[OK] Cache cleared")
             
         except Exception as e:
             logger.warning(f"Failed to clear cache: {e}")

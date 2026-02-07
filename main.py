@@ -22,6 +22,18 @@ Aspect ratio conversion happens only on final clips.
 
 import os
 import sys
+
+# Fix Windows console encoding issues
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        # Fallback for older Python versions
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 import logging
 import json
 import yaml
@@ -31,7 +43,7 @@ from typing import Dict, List
 
 # Import pipeline modules
 from transcript import transcribe_video, check_transcript_quality, extract_audio
-from transcript.transcribe import load_transcript
+from transcript.transcribe import load_transcript, validate_transcript
 from segmenter import build_sentence_windows, build_pause_windows
 from ai import score_segments
 from validator import deduplicate_clips, remove_overlapping_clips
@@ -126,12 +138,12 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         
         if cached_state:
             pipeline_state = cached_state
-            logger.info("✓ Will resume from last completed stage")
+            logger.info("[OK] Will resume from last completed stage")
             logger.info("  (Use --no-cache to force full reprocessing)")
         else:
-            logger.info("✓ No cache found - starting fresh")
+            logger.info("[OK] No cache found - starting fresh")
     else:
-        logger.info("✓ Cache disabled - starting fresh pipeline")
+        logger.info("[OK] Cache disabled - starting fresh pipeline")
     
     # Initialize audit logger
     audit = AuditLogger()
@@ -152,7 +164,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         # Check if this stage is cached
         if cache.has_completed_stage(pipeline_state, 'audio_extraction'):
             audio_path = cache.get_stage_result(pipeline_state, 'audio_extraction', 'audio_path')
-            logger.info(f"✓ SKIPPED (using cached result): {audio_path}")
+            logger.info(f"[OK] SKIPPED (using cached result): {audio_path}")
             
             # Verify file still exists
             if not os.path.exists(audio_path):
@@ -190,18 +202,43 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         logger.info("STAGE 2: TRANSCRIPT GENERATION")
         logger.info("=" * 80)
         
-        # Check if this stage is cached
+        # Define transcript path
+        transcript_path = os.path.join(work_dir, "transcript.json")
+        
+        # Check if this stage is cached OR if transcript.json already exists
         if cache.has_completed_stage(pipeline_state, 'transcription'):
-            transcript_path = cache.get_stage_result(pipeline_state, 'transcription', 'transcript_path')
-            logger.info(f"✓ SKIPPED (using cached result): {transcript_path}")
+            cached_transcript_path = cache.get_stage_result(pipeline_state, 'transcription', 'transcript_path')
+            logger.info(f"[OK] SKIPPED (using cached result): {cached_transcript_path}")
             
             # Verify file still exists
-            if not os.path.exists(transcript_path):
+            if not os.path.exists(cached_transcript_path):
                 logger.warning("Cached transcript file not found, re-transcribing...")
                 cache_hit = False
             else:
+                transcript_path = cached_transcript_path
                 transcript_data = load_transcript(transcript_path)
                 cache_hit = True
+        elif use_cache and os.path.exists(transcript_path) and validate_transcript(transcript_path):
+            # Transcript exists but not in cache - validate and use it
+            try:
+                transcript_data = load_transcript(transcript_path)
+                logger.info(f"[OK] SKIPPED (using cached transcript): {transcript_path}")
+                logger.info(f"[OK] Cached transcript has {len(transcript_data['segments'])} segments")
+                audit.log_pipeline_event("transcription", "skipped_cached", transcript_path)
+                cache_hit = True
+                
+                # Update cache with this transcript
+                if use_cache:
+                    pipeline_state['transcription'] = {
+                        'completed': True,
+                        'transcript_path': transcript_path,
+                        'segment_count': len(transcript_data.get("segments", []))
+                    }
+                    cache.save_state(video_path, pipeline_state, 'transcription')
+            except Exception as e:
+                logger.warning(f"Cached transcript invalid or corrupt: {e}")
+                logger.info("Re-generating transcript...")
+                cache_hit = False
         else:
             cache_hit = False
         
@@ -263,7 +300,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         # Check if this stage is cached
         if cache.has_completed_stage(pipeline_state, 'segmentation'):
             all_candidates = cache.get_stage_result(pipeline_state, 'segmentation', 'candidates')
-            logger.info(f"✓ SKIPPED (using cached result): {len(all_candidates)} candidates")
+            logger.info(f"[OK] SKIPPED (using cached result): {len(all_candidates)} candidates")
             cache_hit = True
         else:
             cache_hit = False
@@ -317,7 +354,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         # Check if this stage is cached
         if cache.has_completed_stage(pipeline_state, 'ai_scoring'):
             scored_segments = cache.get_stage_result(pipeline_state, 'ai_scoring', 'scored_segments')
-            logger.info(f"✓ SKIPPED (using cached result): {len(scored_segments)} scored segments")
+            logger.info(f"[OK] SKIPPED (using cached result): {len(scored_segments)} scored segments")
             
             # Filter by minimum score threshold
             min_score = config['model'].get('min_score_threshold', 6.0)

@@ -79,6 +79,7 @@ def transcribe_video(video_path: str, output_dir: str, model_size: str = "base")
         
         # Convert segments to our format (iterator needs to be consumed)
         logger.info("Processing transcription segments...")
+        segment_count = 0
         for segment in segments:
             segment_data = {
                 "start": segment.start,
@@ -98,6 +99,11 @@ def transcribe_video(video_path: str, output_dir: str, model_size: str = "base")
                     })
             
             transcript_data["segments"].append(segment_data)
+            segment_count += 1
+            
+            # Add progress logging every 100 segments
+            if segment_count > 0 and segment_count % 100 == 0:
+                logger.info(f"Progress: {segment_count} segments processed...")
         
         # Save transcript to JSON
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -131,3 +137,39 @@ def load_transcript(transcript_path: str) -> Dict:
     
     with open(transcript_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+def validate_transcript(transcript_path: str) -> bool:
+    """
+    Validate that a transcript file is complete and usable.
+    
+    Args:
+        transcript_path: Path to transcript.json
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    try:
+        if not os.path.exists(transcript_path):
+            return False
+        
+        with open(transcript_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Check required fields
+        if "segments" not in data or not isinstance(data["segments"], list):
+            return False
+        
+        if len(data["segments"]) == 0:
+            return False
+        
+        # Check if segments have required fields
+        for seg in data["segments"][:5]:  # Check first 5 segments
+            if "text" not in seg or "start" not in seg or "end" not in seg:
+                return False
+        
+        return True
+        
+    except Exception as e:
+        logger.debug(f"Transcript validation failed: {e}")
+        return False
