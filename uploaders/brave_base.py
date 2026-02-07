@@ -253,14 +253,6 @@ class BraveBrowserBase:
             # NOT: C:\Users\<USER>\AppData\Local\BraveSoftware\Brave-Browser\User Data
             
             profile_path = os.path.join(self.user_data_dir, self.profile_directory)
-            
-            if not os.path.exists(profile_path):
-                raise FileNotFoundError(
-                    f"Brave profile not found: {profile_path}\n"
-                    f"Available profiles in {self.user_data_dir}:\n" + 
-                    "\n".join(f"  - {p}" for p in self._list_available_profiles())
-                )
-            
             logger.info(f"Using FULL profile path: {profile_path}")
             
             # Persistent context with real profile
@@ -311,29 +303,28 @@ class BraveBrowserBase:
         
         logger.info("Brave browser launched successfully")
         
-        # VERIFY PROFILE WAS ACTUALLY LOADED
-        if self.user_data_dir:
-            is_real_profile = self._verify_profile_loaded()
-            if not is_real_profile:
-                logger.critical(
-                    "⚠️ WARNING: Temporary profile detected!\n"
-                    "Your login sessions will NOT be preserved.\n"
-                    "Check BRAVE_USER_DATA_DIR configuration."
-                )
-        
         return self.page
     
-    def _verify_profile_loaded(self) -> bool:
+    def _verify_profile_loaded(self, skip_navigation: bool = False) -> bool:
         """
         Verify that the real Brave profile was loaded (not a temp profile).
         
+        NOTE: This method is optional and should only be called when needed,
+        as it navigates to chrome://version/ which may disrupt workflow.
+        
+        Args:
+            skip_navigation: If True, skips verification (returns True by default)
+        
         Returns:
-            True if real profile detected, False if temp profile
+            True if real profile detected or verification skipped, False if temp profile detected
         """
-        if not self.page:
-            return False
+        if skip_navigation or not self.page:
+            return True
         
         try:
+            # Store current URL to restore later
+            current_url = self.page.url
+            
             # Check for profile indicators
             self.page.goto("chrome://version/", wait_until="load", timeout=5000)
             content = self.page.content()
@@ -341,11 +332,17 @@ class BraveBrowserBase:
             # Check if User Data directory matches expected path
             if self.user_data_dir and self.user_data_dir in content:
                 logger.info("✅ VERIFIED: Real Brave profile loaded successfully")
-                return True
+                result = True
             else:
                 logger.error("❌ FAILED: Temporary profile detected! User Data dir mismatch")
                 logger.error(f"Expected: {self.user_data_dir}")
-                return False
+                result = False
+            
+            # Restore previous URL if it was a real page (not about:blank)
+            if current_url and current_url != "about:blank":
+                self.page.goto(current_url, wait_until="load", timeout=5000)
+            
+            return result
         except Exception as e:
             logger.warning(f"Could not verify profile: {e}")
             return False

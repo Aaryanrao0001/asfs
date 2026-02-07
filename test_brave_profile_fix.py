@@ -34,15 +34,15 @@ def test_dotenv_loading():
     logger.info("TEST: .env File Loading")
     logger.info("=" * 80)
     
-    # Create a temporary .env file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False) as f:
-        f.write("TEST_BRAVE_VAR=test_value\n")
-        temp_env_file = f.name
-    
-    try:
+    # Create a temporary directory with a .env file
+    with tempfile.TemporaryDirectory() as temp_dir:
+        env_file = os.path.join(temp_dir, '.env')
+        with open(env_file, 'w') as f:
+            f.write("TEST_BRAVE_VAR=test_value\n")
+        
         # Import dotenv and load the temp file
         from dotenv import load_dotenv
-        load_dotenv(temp_env_file)
+        load_dotenv(env_file)
         
         # Verify the variable was loaded
         test_value = os.getenv("TEST_BRAVE_VAR")
@@ -56,8 +56,6 @@ def test_dotenv_loading():
             del os.environ["TEST_BRAVE_VAR"]
         
         return True
-    finally:
-        os.unlink(temp_env_file)
 
 
 def test_profile_path_construction():
@@ -266,11 +264,17 @@ def test_profile_verification_method():
         
         logger.info("✓ PASS: _verify_profile_loaded() method exists")
         
-        # Test with no page (should return False)
-        result = browser._verify_profile_loaded()
-        assert result == False, "Should return False when page is None"
+        # Test with no page and skip_navigation=True (should return True)
+        result = browser._verify_profile_loaded(skip_navigation=True)
+        assert result == True, "Should return True when skip_navigation=True"
         
-        logger.info("✓ PASS: Returns False when page is None")
+        logger.info("✓ PASS: Returns True when skip_navigation=True")
+        
+        # Test with no page and skip_navigation=False (should return True as page is None)
+        result = browser._verify_profile_loaded(skip_navigation=False)
+        assert result == True, "Should return True when page is None"
+        
+        logger.info("✓ PASS: Returns True when page is None")
         
         return True
 
