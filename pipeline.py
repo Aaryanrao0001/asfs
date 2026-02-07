@@ -623,54 +623,54 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
             )
             
             for task in scheduled_tasks:
-            clip = task['clip']
-            platform = task['platform']
-            clip_id = clip['clip_id']
-            
-            logger.info(f"\nUploading {clip_id} to {platform}...")
-            
-            # Check if upload is allowed (rate limiting)
-            if not queue.can_upload(platform):
-                logger.info(f"Rate limit reached for {platform}, skipping for now")
-                audit.log_upload_event(clip_id, platform, "rate_limited")
-                continue
-            
-            try:
-                caption = clip['captions'].get(platform, "")
-                hashtags = clip['hashtags'].get(platform, [])
-                video_file = clip['file_path']
+                clip = task['clip']
+                platform = task['platform']
+                clip_id = clip['clip_id']
                 
-                upload_id = None
+                logger.info(f"\nUploading {clip_id} to {platform}...")
                 
-                if platform == "TikTok":
-                    upload_id = upload_to_tiktok(
-                        video_file, caption, hashtags, upload_credentials["TikTok"]
-                    )
-                elif platform == "Instagram":
-                    upload_id = upload_to_instagram(
-                        video_file, caption, hashtags, upload_credentials["Instagram"]
-                    )
-                elif platform == "YouTube":
-                    upload_id = upload_to_youtube(
-                        video_file, caption, hashtags, upload_credentials["YouTube"]
-                    )
+                # Check if upload is allowed (rate limiting)
+                if not queue.can_upload(platform):
+                    logger.info(f"Rate limit reached for {platform}, skipping for now")
+                    audit.log_upload_event(clip_id, platform, "rate_limited")
+                    continue
                 
-                if upload_id:
-                    logger.info(f"[OK] Upload successful: {upload_id}")
-                    queue.record_upload(platform, clip_id, success=True)
-                    audit.log_upload_event(clip_id, platform, "success", upload_id)
-                    successful_uploads += 1
-                else:
-                    logger.warning(f"[FAIL] Upload failed (no ID returned)")
+                try:
+                    caption = clip['captions'].get(platform, "")
+                    hashtags = clip['hashtags'].get(platform, [])
+                    video_file = clip['file_path']
+                    
+                    upload_id = None
+                    
+                    if platform == "TikTok":
+                        upload_id = upload_to_tiktok(
+                            video_file, caption, hashtags, upload_credentials["TikTok"]
+                        )
+                    elif platform == "Instagram":
+                        upload_id = upload_to_instagram(
+                            video_file, caption, hashtags, upload_credentials["Instagram"]
+                        )
+                    elif platform == "YouTube":
+                        upload_id = upload_to_youtube(
+                            video_file, caption, hashtags, upload_credentials["YouTube"]
+                        )
+                    
+                    if upload_id:
+                        logger.info(f"[OK] Upload successful: {upload_id}")
+                        queue.record_upload(platform, clip_id, success=True)
+                        audit.log_upload_event(clip_id, platform, "success", upload_id)
+                        successful_uploads += 1
+                    else:
+                        logger.warning(f"[FAIL] Upload failed (no ID returned)")
+                        queue.record_upload(platform, clip_id, success=False)
+                        audit.log_upload_event(clip_id, platform, "failed")
+                        failed_uploads += 1
+                    
+                except Exception as e:
+                    logger.error(f"[FAIL] Upload error: {str(e)}")
                     queue.record_upload(platform, clip_id, success=False)
-                    audit.log_upload_event(clip_id, platform, "failed")
+                    audit.log_upload_event(clip_id, platform, "failed", error_message=str(e))
                     failed_uploads += 1
-                
-            except Exception as e:
-                logger.error(f"[FAIL] Upload error: {str(e)}")
-                queue.record_upload(platform, clip_id, success=False)
-                audit.log_upload_event(clip_id, platform, "failed", error_message=str(e))
-                failed_uploads += 1
         
         finally:
             # Close browser manager after all uploads complete
