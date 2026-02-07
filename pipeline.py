@@ -51,7 +51,7 @@ from clipper import extract_clips
 from metadata import generate_captions, generate_hashtags
 from scheduler import UploadQueue
 from scheduler.queue import load_rate_limits
-from uploaders import upload_to_tiktok, upload_to_instagram, upload_to_youtube
+from uploaders import upload_to_tiktok, upload_to_instagram, upload_to_youtube, BraveBrowserManager
 from audit import AuditLogger
 from cache import PipelineCache
 
@@ -584,16 +584,45 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         logger.info("=" * 80)
         audit.log_pipeline_event("uploads", "started", video_path)
         
+        # Load browser configuration from environment or use defaults
+        brave_path = os.getenv("BRAVE_PATH")  # Optional - auto-detect if not set
+        brave_user_data_dir = os.getenv("BRAVE_USER_DATA_DIR")  # Required for persistent login
+        brave_profile_directory = os.getenv("BRAVE_PROFILE_DIRECTORY", "Default")
+        
+        # Populate credentials with browser configuration
         upload_credentials = {
-            "TikTok": {},
-            "Instagram": {},
-            "YouTube": {}
+            "TikTok": {
+                "brave_path": brave_path,
+                "brave_user_data_dir": brave_user_data_dir,
+                "brave_profile_directory": brave_profile_directory
+            },
+            "Instagram": {
+                "brave_path": brave_path,
+                "brave_user_data_dir": brave_user_data_dir,
+                "brave_profile_directory": brave_profile_directory
+            },
+            "YouTube": {
+                "brave_path": brave_path,
+                "brave_user_data_dir": brave_user_data_dir,
+                "brave_profile_directory": brave_profile_directory
+            }
         }
         
         successful_uploads = 0
         failed_uploads = 0
         
-        for task in scheduled_tasks:
+        # Initialize BraveBrowserManager once for all uploads
+        browser_manager = None
+        try:
+            logger.info("Initializing shared Brave browser for uploads")
+            browser_manager = BraveBrowserManager.get_instance()
+            browser_manager.initialize(
+                brave_path=brave_path,
+                user_data_dir=brave_user_data_dir,
+                profile_directory=brave_profile_directory
+            )
+            
+            for task in scheduled_tasks:
             clip = task['clip']
             platform = task['platform']
             clip_id = clip['clip_id']
@@ -642,6 +671,12 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                 queue.record_upload(platform, clip_id, success=False)
                 audit.log_upload_event(clip_id, platform, "failed", error_message=str(e))
                 failed_uploads += 1
+        
+        finally:
+            # Close browser manager after all uploads complete
+            if browser_manager:
+                logger.info("Closing shared Brave browser")
+                browser_manager.close()
         
         audit.log_pipeline_event("uploads", "completed", video_path,
                                 {"successful": successful_uploads,

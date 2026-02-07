@@ -5,6 +5,7 @@ Navigates to TikTok upload page and automates the upload process.
 """
 
 import os
+import random
 import logging
 from typing import Optional
 from .brave_base import BraveBrowserBase
@@ -156,6 +157,7 @@ def upload_to_tiktok(
     Upload to TikTok (browser-based).
     
     This maintains API compatibility with the old API-based uploader.
+    Now uses BraveBrowserManager if available for shared browser context.
     
     Args:
         video_path: Path to video file
@@ -166,6 +168,8 @@ def upload_to_tiktok(
     Returns:
         Upload ID/result if successful, None if failed
     """
+    from .brave_manager import BraveBrowserManager
+    
     # Extract browser settings from credentials
     brave_path = credentials.get("brave_path")
     user_data_dir = credentials.get("brave_user_data_dir")
@@ -174,13 +178,150 @@ def upload_to_tiktok(
     # Format hashtags
     tags = " ".join(hashtags) if hashtags else ""
     
-    # Use caption as both title and description
-    return upload_to_tiktok_browser(
-        video_path=video_path,
-        title=caption[:100],  # TikTok title has limits
-        description=caption,
-        tags=tags,
-        brave_path=brave_path,
-        user_data_dir=user_data_dir,
-        profile_directory=profile_directory
-    )
+    # Check if BraveBrowserManager is initialized (pipeline mode)
+    manager = BraveBrowserManager.get_instance()
+    if manager.is_initialized:
+        # Use shared browser context (pipeline mode)
+        logger.info("Using shared browser context from BraveBrowserManager")
+        return _upload_to_tiktok_with_manager(
+            video_path=video_path,
+            title=caption[:100],
+            description=caption,
+            tags=tags
+        )
+    else:
+        # Standalone mode - use direct browser launch
+        logger.info("Using standalone browser mode")
+        return upload_to_tiktok_browser(
+            video_path=video_path,
+            title=caption[:100],  # TikTok title has limits
+            description=caption,
+            tags=tags,
+            brave_path=brave_path,
+            user_data_dir=user_data_dir,
+            profile_directory=profile_directory
+        )
+
+
+def _upload_to_tiktok_with_manager(
+    video_path: str,
+    title: str,
+    description: str,
+    tags: str
+) -> Optional[str]:
+    """
+    Upload to TikTok using shared browser from BraveBrowserManager.
+    
+    This function is called when pipeline has initialized the manager.
+    It gets a page from the shared context instead of creating a new browser.
+    """
+    from .brave_manager import BraveBrowserManager
+    
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    
+    logger.info("Starting TikTok browser upload with shared context")
+    
+    page = None
+    try:
+        manager = BraveBrowserManager.get_instance()
+        page = manager.get_page()
+        
+        # Navigate to TikTok upload page
+        logger.info("Navigating to TikTok upload page")
+        page.goto("https://www.tiktok.com/upload", wait_until="networkidle")
+        page.wait_for_timeout(random.randint(2000, 4000))
+        
+        # Check if user is logged in
+        if "login" in page.url.lower():
+            logger.warning("TikTok login required - please log in manually")
+            logger.info("Waiting 60 seconds for manual login...")
+            page.wait_for_url("**/upload**", timeout=60000)
+            logger.info("Login successful, continuing upload")
+        
+        # Upload video file
+        logger.info("Uploading video file")
+        try:
+            file_input_selector = 'input[type="file"]'
+            file_input = page.wait_for_selector(file_input_selector, timeout=10000)
+            file_input.set_input_files(video_path)
+        except Exception as e:
+            logger.warning(f"Primary file selector failed, trying alternative: {e}")
+            file_input_selector = '[data-e2e="upload-input"]'
+            file_input = page.wait_for_selector(file_input_selector, timeout=10000)
+            file_input.set_input_files(video_path)
+        
+        page.wait_for_timeout(random.randint(3000, 5000))
+        
+        # Wait for video to process
+        logger.info("Waiting for video processing...")
+        page.wait_for_timeout(5000)
+        
+        # Fill in caption (title + description + tags)
+        full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
+        
+        logger.info("Filling caption")
+        try:
+            caption_selector = '[data-e2e="caption-input"]'
+            element = page.wait_for_selector(caption_selector, timeout=10000)
+            element.click()
+            page.keyboard.press("Control+A")
+            page.keyboard.press("Backspace")
+            for char in full_caption:
+                element.type(char, delay=random.uniform(50, 150))
+        except Exception as e:
+            logger.warning(f"Primary caption selector failed, trying alternative: {e}")
+            caption_selector = 'div[contenteditable="true"]'
+            element = page.wait_for_selector(caption_selector, timeout=10000)
+            element.click()
+            page.keyboard.press("Control+A")
+            page.keyboard.press("Backspace")
+            for char in full_caption:
+                element.type(char, delay=random.uniform(50, 150))
+        
+        page.wait_for_timeout(random.randint(2000, 3000))
+        
+        # Click Post/Upload button
+        logger.info("Clicking Post button")
+        try:
+            post_button_selector = '[data-e2e="post-button"]'
+            page.wait_for_selector(post_button_selector, timeout=5000)
+            post_button = page.query_selector(post_button_selector)
+            post_button.click()
+            page.wait_for_timeout(3000)
+        except Exception as e:
+            logger.warning(f"Primary post button selector failed, trying alternative: {e}")
+            post_button_selector = 'button:has-text("Post")'
+            post_button = page.wait_for_selector(post_button_selector, timeout=5000)
+            post_button.click()
+            page.wait_for_timeout(3000)
+        
+        # Wait for upload confirmation
+        logger.info("Waiting for upload confirmation...")
+        page.wait_for_timeout(5000)
+        
+        # Check for success indicators
+        current_url = page.url
+        
+        if "upload" not in current_url.lower() or "success" in page.content().lower():
+            logger.info("TikTok upload completed successfully")
+            result = "TikTok upload successful"
+        else:
+            logger.warning("Upload status unclear - manual verification recommended")
+            result = "TikTok upload submitted (verify manually)"
+        
+        # Navigate to about:blank for next uploader
+        manager.navigate_to_blank(page)
+        manager.close_page(page)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"TikTok browser upload failed: {str(e)}")
+        if page:
+            try:
+                manager = BraveBrowserManager.get_instance()
+                manager.close_page(page)
+            except:
+                pass
+        return None
