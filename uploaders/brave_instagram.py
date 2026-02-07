@@ -12,6 +12,18 @@ from .brave_base import BraveBrowserBase
 
 logger = logging.getLogger(__name__)
 
+# Instagram Create button selectors (ordered by reliability)
+# Instagram frequently changes UI through A/B testing, so we try multiple strategies
+INSTAGRAM_CREATE_SELECTORS = [
+    'svg[aria-label*="New"]',  # Icon-based
+    'a[href*="create"]',  # Link-based
+    '[role="menuitem"]:has-text("Create")',  # Role-based menuitem
+    'button[role="button"]:has-text("Create")',  # Role-based button
+    'div[role="button"]:has-text("Create")',  # Div acting as button
+    '[aria-label*="Create"]',  # Generic aria-label
+    'text="Create"'  # Text fallback
+]
+
 
 def upload_to_instagram_browser(
     video_path: str,
@@ -63,17 +75,7 @@ def upload_to_instagram_browser(
         create_clicked = False
         
         # Try multiple selectors due to Instagram's frequent A/B testing
-        create_selectors = [
-            'svg[aria-label*="New"]',  # Icon-based
-            'a[href*="create"]',  # Link-based
-            '[role="menuitem"]:has-text("Create")',  # Role-based menuitem
-            'button[role="button"]:has-text("Create")',  # Role-based button
-            'div[role="button"]:has-text("Create")',  # Div acting as button
-            '[aria-label*="Create"]',  # Generic aria-label
-            'text="Create"'  # Text fallback
-        ]
-        
-        for selector in create_selectors:
+        for selector in INSTAGRAM_CREATE_SELECTORS:
             try:
                 logger.debug(f"Trying Create selector: {selector}")
                 page.wait_for_selector(selector, timeout=3000)
@@ -271,17 +273,7 @@ def _upload_to_instagram_with_manager(
         create_clicked = False
         
         # Try multiple selectors due to Instagram's frequent A/B testing
-        create_selectors = [
-            'svg[aria-label*="New"]',  # Icon-based
-            'a[href*="create"]',  # Link-based
-            '[role="menuitem"]:has-text("Create")',  # Role-based menuitem
-            'button[role="button"]:has-text("Create")',  # Role-based button
-            'div[role="button"]:has-text("Create")',  # Div acting as button
-            '[aria-label*="Create"]',  # Generic aria-label
-            'text="Create"'  # Text fallback
-        ]
-        
-        for selector in create_selectors:
+        for selector in INSTAGRAM_CREATE_SELECTORS:
             try:
                 logger.debug(f"Trying Create selector: {selector}")
                 page.wait_for_selector(selector, timeout=3000)

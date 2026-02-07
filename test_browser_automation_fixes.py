@@ -160,12 +160,12 @@ class TestInstagramSelectorFallbacks(unittest.TestCase):
         self.assertIn('div[role="button"]', content,
                      "Missing div role selector")
         
-        # Check for fallback iteration logic
-        self.assertIn('create_selectors', content,
-                     "Missing selector array for fallbacks")
+        # Check for fallback iteration logic - check for constant
+        self.assertIn('INSTAGRAM_CREATE_SELECTORS', content,
+                     "Missing Instagram create selectors constant")
         
         # Check for multiple selector attempts
-        self.assertIn('for selector in create_selectors', content,
+        self.assertIn('for selector in INSTAGRAM_CREATE_SELECTORS', content,
                      "Missing iteration through selectors")
         
         logger.info("[OK] Instagram has multiple fallback selectors")

@@ -12,6 +12,15 @@ from .brave_base import BraveBrowserBase
 
 logger = logging.getLogger(__name__)
 
+# TikTok network error messages
+TIKTOK_NETWORK_ERROR_MESSAGES = [
+    "[FAIL] Network error accessing TikTok - possible causes:",
+    "  1. Internet connection issue",
+    "  2. TikTok may be blocked in your region",
+    "  3. Firewall or antivirus blocking access",
+    "  4. TikTok service may be temporarily down"
+]
+
 
 def upload_to_tiktok_browser(
     video_path: str,
@@ -53,11 +62,8 @@ def upload_to_tiktok_browser(
         except Exception as nav_error:
             error_msg = str(nav_error).lower()
             if "net::" in error_msg or "timeout" in error_msg:
-                logger.error("[FAIL] Network error accessing TikTok - possible causes:")
-                logger.error("  1. Internet connection issue")
-                logger.error("  2. TikTok may be blocked in your region")
-                logger.error("  3. Firewall or antivirus blocking access")
-                logger.error("  4. TikTok service may be temporarily down")
+                for msg in TIKTOK_NETWORK_ERROR_MESSAGES:
+                    logger.error(msg)
                 raise Exception(f"Network error: Cannot reach TikTok upload page - {nav_error}")
             else:
                 raise
@@ -247,11 +253,8 @@ def _upload_to_tiktok_with_manager(
         except Exception as nav_error:
             error_msg = str(nav_error).lower()
             if "net::" in error_msg or "timeout" in error_msg:
-                logger.error("[FAIL] Network error accessing TikTok - possible causes:")
-                logger.error("  1. Internet connection issue")
-                logger.error("  2. TikTok may be blocked in your region")
-                logger.error("  3. Firewall or antivirus blocking access")
-                logger.error("  4. TikTok service may be temporarily down")
+                for msg in TIKTOK_NETWORK_ERROR_MESSAGES:
+                    logger.error(msg)
                 raise Exception(f"Network error: Cannot reach TikTok upload page - {nav_error}")
             else:
                 raise
