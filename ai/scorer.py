@@ -183,7 +183,7 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
         available_models = []
         for m in response.get('models', []):
             # Try both common field names
-            model_id = m.get('name') or m.get('model')
+            model_id = m.get('name') if m.get('name') is not None else m.get('model')
             if model_id:
                 available_models.append(model_id)
         
@@ -199,10 +199,11 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
         available_normalized = [m.lower().strip() for m in available_models]
         
         # Strategy 1: Exact match (preferred)
-        if model_name_normalized in available_normalized:
-            matched_model = available_models[available_normalized.index(model_name_normalized)]
-            logger.info(f"Ollama is running with model: {matched_model} (exact match)")
-            return True
+        for i, available in enumerate(available_normalized):
+            if available == model_name_normalized:
+                matched_model = available_models[i]
+                logger.info(f"Ollama is running with model: {matched_model} (exact match)")
+                return True
         
         # Strategy 2: Base name match (e.g., "qwen3:8b" matches "qwen3:*")
         model_base = model_name_normalized.split(':')[0]
@@ -224,7 +225,7 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
         return False
     except Exception as e:
         logger.warning(f"Ollama availability check failed: {e}")
-        logger.debug(f"Full error: {e}", exc_info=True)
+        logger.debug("Full error details:", exc_info=True)
         return False
 
 
