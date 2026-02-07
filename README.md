@@ -197,9 +197,9 @@ The system now supports **local inference** using Ollama with automatic fallback
 
 | Model | VRAM Required | Performance | Use Case |
 |-------|--------------|-------------|----------|
-| `qwen3:4b` | ~3-4 GB | Fast, good quality | Low-end GPUs, laptops |
-| `qwen3:8b` | ~6-8 GB | Better quality | Mid-range GPUs |
-| `qwen3:14b` | ~10-14 GB | Best quality | High-end GPUs |
+| `qwen3:4b` | 3-4 GB | Fast, good quality | Low-end GPUs, laptops |
+| `qwen3:8b` | 6-8 GB | Better quality | Mid-range GPUs |
+| `qwen3:14b` | 10-14 GB | Best quality | High-end GPUs |
 
 **CPU-Only Mode (for systems with insufficient VRAM):**
 ```bash

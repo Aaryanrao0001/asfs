@@ -242,8 +242,9 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
                     options={"num_predict": 10}  # Minimal tokens for test
                 )
                 # Verify response is not empty
+                MIN_TEST_RESPONSE_LENGTH = 10  # Minimum chars to consider valid response
                 content = test_response.get('message', {}).get('content', '')
-                if not content or len(content) < 10:
+                if not content or len(content) < MIN_TEST_RESPONSE_LENGTH:
                     logger.warning("Ollama test inference returned empty/invalid response")
                     if "memory" in str(content).lower():
                         logger.info("[TIP] Use CPU mode (OLLAMA_NO_GPU=1) or smaller model (qwen3:4b)")
@@ -719,9 +720,15 @@ def score_segments(
     # Only initialize API client if we're NOT in pure local mode OR if in auto mode (for fallback)
     should_init_api_client = (
         (llm_backend == "api") or 
-        (llm_backend == "auto" and not ollama_available) or
-        (llm_backend == "local" and not ollama_available)
+        (llm_backend == "auto" and not ollama_available)
     )
+    
+    # Special case: local mode requested but Ollama unavailable
+    if llm_backend == "local" and not ollama_available:
+        logger.error("Local LLM mode requested but Ollama is unavailable")
+        logger.error("Please ensure Ollama is running and model is available")
+        logger.info("To use API instead, change llm_backend to 'auto' or 'api' in config/model.yaml")
+        raise RuntimeError("Local LLM mode requested but Ollama unavailable. Set llm_backend='auto' for fallback.")
     
     if should_init_api_client:
         if AZURE_SDK_AVAILABLE:
