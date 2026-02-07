@@ -227,7 +227,7 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
         if not matched_model:
             logger.warning(f"Ollama is running but model '{model_name}' not found.")
             logger.info(f"Available models: {', '.join(available_models)}")
-            logger.info(f"Tip: Check your config/model.yaml - local_model_name should match one of the above")
+            logger.info("[TIP] Check your config/model.yaml - local_model_name should match one of the above")
             return False, None
         
         # Test inference to verify GPU/memory availability (if Ollama SDK is available)
@@ -241,13 +241,22 @@ def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float =
                     stream=False,  # ✅ Critical: Disable streaming
                     options={"num_predict": 10}  # Minimal tokens for test
                 )
-                logger.info(f"✅ Ollama model {matched_model} test inference successful")
+                # Verify response is not empty
+                MIN_TEST_RESPONSE_LENGTH = 10  # Minimum chars to consider valid response
+                content = test_response.get('message', {}).get('content', '')
+                if not content or len(content) < MIN_TEST_RESPONSE_LENGTH:
+                    logger.warning("Ollama test inference returned empty/invalid response")
+                    if "memory" in str(content).lower():
+                        logger.info("[TIP] Use CPU mode (OLLAMA_NO_GPU=1) or smaller model (qwen3:4b)")
+                    return False, None
+                
+                logger.info(f"[OK] Ollama model {matched_model} test inference successful")
                 return True, matched_model
             except Exception as e:
                 error_msg = str(e).lower()
                 if "memory" in error_msg or "allocation" in error_msg or "vram" in error_msg:
                     logger.warning(f"Ollama GPU memory error: {e}")
-                    logger.info(f"Tip: Consider using CPU-only mode (OLLAMA_NO_GPU=1) or smaller model")
+                    logger.info("[TIP] Consider using CPU-only mode (OLLAMA_NO_GPU=1) or smaller model")
                 else:
                     logger.warning(f"Ollama test inference failed: {e}")
                 return False, None
@@ -697,19 +706,31 @@ def score_segments(
     
     if ollama_available:
         effective_batch_size = 1  # Force single-segment processing for Ollama
-        logger.info("🔥 LOCAL LLM MODE: Ollama processes one segment at a time (no batching)")
+        logger.info("[LOCAL] Ollama processes one segment at a time (no batching)")
         logger.info(f"Backend: Local LLM (Ollama)")
         logger.info(f"Will score {len(segments_to_score)} segments using LOCAL Ollama with keep_alive={local_keep_alive}")
     else:
         effective_batch_size = BATCH_SIZE
-        logger.info(f"☁️ API MODE: Batch processing enabled (batch_size={effective_batch_size})")
+        logger.info(f"[API] Batch processing enabled (batch_size={effective_batch_size})")
         logger.info(f"Will score {len(segments_to_score)} segments using API ({effective_batch_size} per batch)")
     
-    # Initialize AI client only when NOT using Ollama exclusively
+    # Initialize AI client only when needed (not for pure local mode)
     client = None
     
-    # Only initialize API client if we might use it
-    if not ollama_available or llm_backend == "auto":
+    # Only initialize API client if we're NOT in pure local mode OR if in auto mode (for fallback)
+    should_init_api_client = (
+        (llm_backend == "api") or 
+        (llm_backend == "auto" and not ollama_available)
+    )
+    
+    # Special case: local mode requested but Ollama unavailable
+    if llm_backend == "local" and not ollama_available:
+        logger.error("Local LLM mode requested but Ollama is unavailable")
+        logger.error("Please ensure Ollama is running and model is available")
+        logger.info("To use API instead, change llm_backend to 'auto' or 'api' in config/model.yaml")
+        raise RuntimeError("Local LLM mode requested but Ollama unavailable. Set llm_backend='auto' for fallback.")
+    
+    if should_init_api_client:
         if AZURE_SDK_AVAILABLE:
             try:
                 client = ChatCompletionsClient(
@@ -730,8 +751,12 @@ def score_segments(
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenAI SDK: {e}")
         
-        if client is None and not ollama_available:
-            raise RuntimeError("No compatible SDK available. Install azure-ai-inference or openai.")
+        if client is None:
+            if ollama_available and llm_backend == "auto":
+                # Fallback to local is OK in auto mode
+                logger.info("API client initialization failed, will use local Ollama")
+            else:
+                raise RuntimeError("No compatible SDK available. Install azure-ai-inference or openai.")
     
     # Define system message once (used for all segments)
     system_message = """You are a video content analyzer. 
@@ -745,6 +770,12 @@ CRITICAL: You MUST respond with ONLY valid JSON.
     api_calls_made = 0
     tokens_used = 0
     
+    # Circuit breaker for local LLM failures (Issue 7)
+    CIRCUIT_BREAKER_THRESHOLD = model_config.get('circuit_breaker_threshold', 3)
+    local_failure_count = 0
+    consecutive_memory_errors = 0
+    MAX_MEMORY_ERRORS = 3
+    
     # Get other config
     inter_request_delay = model_config.get('inter_request_delay', 1.5)
     max_cooldown_threshold = model_config.get('max_cooldown_threshold', 60)
@@ -755,7 +786,7 @@ CRITICAL: You MUST respond with ONLY valid JSON.
         batch_segments = segments_to_score[batch_start:batch_end]
         
         # Separate Ollama path from API path
-        if ollama_available:
+        if ollama_available and local_failure_count < CIRCUIT_BREAKER_THRESHOLD:
             # Process with Ollama (one segment at a time)
             for i, segment in enumerate(batch_segments):
                 idx = batch_start + i
@@ -775,17 +806,40 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                         ai_analysis = score_with_ollama(
                             segment=segment,
                             prompt=prompt,
-                            model_name=exact_model_name,  # ✅ Use exact matched model name
+                            model_name=exact_model_name,  # Use exact matched model name
                             temperature=temperature,
                             endpoint=local_endpoint,
-                            keep_alive=local_keep_alive  # ✅ Memory management
+                            keep_alive=local_keep_alive  # Memory management
                         )
-                        logger.debug(f"Segment {idx + 1}/{len(segments_to_score)}: scored with LOCAL Ollama ✅")
+                        logger.debug(f"Segment {idx + 1}/{len(segments_to_score)}: scored with LOCAL Ollama [OK]")
+                        
+                        # Reset failure counters on success
+                        local_failure_count = 0
+                        consecutive_memory_errors = 0
                         
                     except Exception as local_error:
-                        logger.warning(f"Local LLM failed for segment {idx + 1}: {local_error}")
+                        local_failure_count += 1
+                        error_str = str(local_error).lower()
                         
-                        # Fallback to API if auto mode
+                        # Check for memory errors
+                        if "memory" in error_str or "allocation" in error_str:
+                            consecutive_memory_errors += 1
+                            logger.warning(f"Local LLM memory error ({consecutive_memory_errors}/{MAX_MEMORY_ERRORS}): {local_error}")
+                            
+                            if consecutive_memory_errors >= MAX_MEMORY_ERRORS:
+                                logger.error("[CIRCUIT BREAKER] Persistent memory errors - disabling local LLM")
+                                logger.info("[TIP] Use CPU mode: set OLLAMA_NO_GPU=1 or try smaller model")
+                                ollama_available = False
+                                local_failure_count = CIRCUIT_BREAKER_THRESHOLD  # Force circuit break
+                        else:
+                            logger.warning(f"Local LLM failed ({local_failure_count}/{CIRCUIT_BREAKER_THRESHOLD}): {local_error}")
+                        
+                        # Check circuit breaker threshold
+                        if local_failure_count >= CIRCUIT_BREAKER_THRESHOLD:
+                            logger.error(f"[CIRCUIT BREAKER] Disabling local LLM after {local_failure_count} failures")
+                            ollama_available = False
+                        
+                        # Fallback to API if auto mode and client available
                         if llm_backend == "auto" and client is not None:
                             logger.info("Falling back to remote API")
                             ai_response = None
@@ -885,7 +939,38 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                     scored_segments.append(create_fallback_segment(segment))
         
         else:
-            # Process with API (batched)
+            # Process with API (batched or when local unavailable/circuit broken)
+            # Initialize API client on-demand if not yet initialized (for circuit breaker case)
+            if client is None:
+                logger.info("Initializing API client for fallback...")
+                if AZURE_SDK_AVAILABLE:
+                    try:
+                        client = ChatCompletionsClient(
+                            endpoint=endpoint,
+                            credential=AzureKeyCredential(api_key)
+                        )
+                        logger.info("Using Azure AI Inference SDK (on-demand)")
+                    except Exception as e:
+                        logger.error(f"Failed to initialize Azure SDK: {e}")
+                
+                if client is None and OPENAI_SDK_AVAILABLE:
+                    try:
+                        client = OpenAI(
+                            base_url=endpoint,
+                            api_key=api_key
+                        )
+                        logger.info("Using OpenAI SDK (on-demand)")
+                    except Exception as e:
+                        logger.error(f"Failed to initialize OpenAI SDK: {e}")
+                
+                if client is None:
+                    logger.error("Cannot initialize API client for fallback - no compatible SDK available")
+                    # Continue with fallback segments for remaining items
+                    for i, segment in enumerate(batch_segments):
+                        idx = batch_start + i
+                        scored_segments.append(create_fallback_segment(segment))
+                    continue
+            
             if len(batch_segments) == 1:
                 # Single segment API processing
                 segment = batch_segments[0]

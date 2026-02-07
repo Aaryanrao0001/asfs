@@ -36,3 +36,6 @@ model:
   
   # Ollama-specific settings
   local_keep_alive: "5m"  # How long to keep model in memory (5m, 10m, -1 for indefinite)
+  
+  # Circuit breaker configuration
+  circuit_breaker_threshold: 3  # Number of consecutive local failures before switching to API

@@ -115,6 +115,20 @@ asfs/
 
 2. **Python 3.8+**
 
+3. **Windows-specific setup** (if using Windows)
+   
+   For proper Unicode support in console output:
+   ```powershell
+   # Option 1: Set UTF-8 for current session
+   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+   
+   # Option 2: Set system-wide (requires admin)
+   # Control Panel > Region > Administrative > Change system locale...
+   # Check "Beta: Use Unicode UTF-8 for worldwide language support"
+   ```
+   
+   **Note:** The system automatically configures UTF-8 encoding for Python's stdout/stderr to prevent encoding errors.
+
 ### Installation
 
 1. **Clone the repository**
@@ -179,6 +193,25 @@ The system now supports **local inference** using Ollama with automatic fallback
 
 **Benefits:** No API costs, no rate limits, works offline, faster inference.
 
+**VRAM Requirements & Model Selection:**
+
+| Model | VRAM Required | Performance | Use Case |
+|-------|--------------|-------------|----------|
+| `qwen3:4b` | 3-4 GB | Fast, good quality | Low-end GPUs, laptops |
+| `qwen3:8b` | 6-8 GB | Better quality | Mid-range GPUs |
+| `qwen3:14b` | 10-14 GB | Best quality | High-end GPUs |
+
+**CPU-Only Mode (for systems with insufficient VRAM):**
+```bash
+# Windows PowerShell
+$env:OLLAMA_NO_GPU=1
+ollama serve
+
+# Linux/macOS
+export OLLAMA_NO_GPU=1
+ollama serve
+```
+
 **Configuration Best Practices:**
 
 Memory Management:
@@ -197,9 +230,18 @@ Model Names:
 - The system will auto-detect and use the exact available model name
 
 Troubleshooting:
-- If you see "memory allocation" errors: Use CPU mode or smaller model
-- If model not found: Run `ollama list` and update `local_model_name` in config
-- Test inference is performed automatically to verify GPU/memory capability
+- **Empty responses from Ollama**: The system automatically disables streaming (`stream=False`). If issues persist, check Ollama logs.
+- **Model name mismatch (404 errors)**: Run `ollama list` to see exact model names. Update `local_model_name` in `config/model.yaml` to match exactly (e.g., `qwen3:8b` not `qwen3:latest`).
+- **Memory allocation errors**: 
+  - The system has a circuit breaker that automatically switches to API after 3 consecutive failures
+  - Use CPU mode: `OLLAMA_NO_GPU=1` (see above)
+  - Try smaller model: `qwen3:4b` instead of `qwen3:8b`
+  - Increase system RAM/VRAM
+  - Check other GPU-intensive processes
+- **Circuit breaker triggered**: After 3 consecutive local failures, the system automatically switches to API mode for remaining segments. Check logs for root cause.
+- **Model not found**: Run `ollama list` and update `local_model_name` in config to match exactly
+- **Test inference successful but scoring fails**: May indicate memory pressure. The system now uses realistic test prompts to catch this early.
+- **Windows Unicode errors**: Should be automatically fixed. If you see encoding errors, ensure UTF-8 is configured (see Windows-specific setup above).
 
 #### Platform API Setup
 
@@ -444,6 +486,84 @@ summary = audit.get_pipeline_summary()
 - May require GPU for large models
 - Try smaller model: edit transcribe.py, use "tiny" or "base"
 - Check available disk space
+
+## 🩺 Troubleshooting Guide
+
+### Local LLM (Ollama) Issues
+
+**Symptom: "Empty or invalid response" from Ollama**
+- **Cause:** Streaming is enabled by default in Ollama API
+- **Fix:** The system automatically sets `stream=False`. If issues persist:
+  - Check Ollama service: `ollama list` to verify model is loaded
+  - Review Ollama logs for errors
+  - Restart Ollama service
+
+**Symptom: "Model 'qwen3:latest' not found (404)"**
+- **Cause:** Model name mismatch between config and Ollama's registry
+- **Fix:** 
+  1. Check available models: `ollama list`
+  2. Update `local_model_name` in `config/model.yaml` with exact name (e.g., `qwen3:8b`)
+  3. Or pull the model: `ollama pull qwen3:latest`
+
+**Symptom: "Memory layout cannot be allocated" or "VRAM error"**
+- **Cause:** Insufficient GPU memory for model
+- **Fix Options:**
+  1. **Use CPU mode** (recommended for <8GB VRAM):
+     ```bash
+     # Windows
+     $env:OLLAMA_NO_GPU=1
+     ollama serve
+     
+     # Linux/macOS
+     export OLLAMA_NO_GPU=1
+     ollama serve
+     ```
+  2. **Use smaller model**: Change `qwen3:8b` → `qwen3:4b` in config
+  3. **Close other GPU applications**: Free up VRAM
+  4. The system has a circuit breaker that switches to API after 3 consecutive memory errors
+
+**Symptom: "Circuit breaker triggered - disabling local LLM"**
+- **Cause:** 3+ consecutive failures from local model
+- **Behavior:** System automatically switches to API for remaining segments
+- **Fix:** Address root cause (memory, model name, etc.) and restart pipeline
+
+**Symptom: Test inference succeeds but actual scoring fails**
+- **Cause:** Test uses short prompt; real prompts are longer and need more memory
+- **Fix:** The system now uses realistic test prompts. If still failing, use CPU mode or smaller model
+
+**Symptom: "Using Azure SDK" appears in local mode**
+- **Cause:** (Fixed in latest version) API client was initialized unconditionally
+- **Fix:** Update to latest version. In pure local mode, this message should NOT appear
+
+### Windows-Specific Issues
+
+**Symptom: UnicodeEncodeError with emojis or special characters**
+- **Cause:** Windows console defaults to cp1252 encoding
+- **Fix:** 
+  - The system automatically configures UTF-8 (fixed in latest version)
+  - Manually set: `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`
+  - Or enable system-wide in Control Panel (see Prerequisites)
+
+**Symptom: Garbled log output or missing lines**
+- **Cause:** Console buffer limitations with heavy logging
+- **Fix:** (Fixed in latest version) Log verbosity reduced, emojis removed
+
+### API & Rate Limiting Issues
+
+**Symptom: "Rate limit exceeded: retry after Xs"**
+- **Cause:** Too many API requests
+- **Prevention:** 
+  - Use local LLM mode to avoid API limits
+  - Increase `inter_request_delay` in `config/model.yaml`
+  - Reduce `batch_size` for slower, safer processing
+
+**Symptom: All segments score 0**
+- **Cause:** API authentication or response parsing issue
+- **Fix:**
+  1. Verify `GITHUB_TOKEN` is set and valid
+  2. Check token has access to model endpoint
+  3. Review logs for API errors
+  4. Check `response_format` is supported by model
 
 ## 🔐 Security & Privacy
 
