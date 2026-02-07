@@ -26,55 +26,83 @@ except ImportError:
     OPENAI_SDK_AVAILABLE = False
 
 
-def extract_json(text: str) -> dict:
+def extract_json_safe(text: str) -> dict:
     """
-    Extract and parse the first JSON object found in model response.
+    Safely extract and parse JSON from model response.
     
-    Handles cases where model wraps JSON in:
-    - Whitespace/newlines
-    - Markdown code blocks
-    - Explanatory text
+    Handles multiple response formats from different LLM providers:
+    - Clean JSON: {"hook_score": 7, ...}
+    - Markdown wrapped: ```json\n{...}\n```
+    - Text with JSON: "Here's the score: {...}"
+    - Newline prefixed: \n  {...}
     
     Args:
         text: Raw model response string
         
     Returns:
-        Parsed JSON dictionary
+        Parsed dictionary with scores
         
     Raises:
-        ValueError: If no valid JSON found or parsing fails
+        ValueError: If no valid JSON found
     """
-    # Remove markdown code blocks if present
+    if not text or not isinstance(text, str):
+        raise ValueError("Empty or invalid response")
+    
+    # Remove markdown code blocks
     text = re.sub(r'```json\s*', '', text)
     text = re.sub(r'```\s*', '', text)
     
-    # Find start of JSON object
-    start_idx = text.find('{')
-    if start_idx == -1:
-        raise ValueError(f"No JSON object found in model output: {text[:200]}")
+    # Try to find JSON object using regex (more robust)
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON object found in response: {text[:200]}")
     
-    # Count braces to find matching closing brace
-    brace_count = 0
-    end_idx = start_idx
-    
-    for i in range(start_idx, len(text)):
-        if text[i] == '{':
-            brace_count += 1
-        elif text[i] == '}':
-            brace_count -= 1
-            if brace_count == 0:
-                end_idx = i + 1
-                break
-    
-    if brace_count != 0:
-        raise ValueError(f"Unbalanced braces in JSON: {text[start_idx:start_idx+200]}")
-    
-    json_str = text[start_idx:end_idx]
+    json_str = match.group()
     
     try:
-        return json.loads(json_str)
+        data = json.loads(json_str)
+        return data
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON: {e}\nExtracted: {json_str[:200]}")
+
+
+def extract_score_safe(data: dict, field: str, default: float = 0.0) -> float:
+    """
+    Safely extract a numeric score from parsed JSON.
+    
+    Handles multiple schema variations:
+    - Direct key: {"hook_score": 7}
+    - Nested: {"scores": {"hook_score": 7}}
+    - String numbers: {"hook_score": "7"}
+    
+    Args:
+        data: Parsed JSON dictionary
+        field: Field name to extract (e.g., "hook_score")
+        default: Default value if field not found
+        
+    Returns:
+        Numeric score as float
+    """
+    try:
+        # Try direct access
+        if field in data:
+            return float(data[field])
+        
+        # Try nested in "scores"
+        if "scores" in data and isinstance(data["scores"], dict):
+            if field in data["scores"]:
+                return float(data["scores"][field])
+        
+        # Try without underscore (e.g., "hookscore")
+        alt_field = field.replace("_", "")
+        if alt_field in data:
+            return float(data[alt_field])
+        
+        # Not found
+        return default
+        
+    except (ValueError, TypeError):
+        return default
 
 
 
@@ -202,49 +230,68 @@ CRITICAL: You MUST respond with ONLY valid JSON.
             # DEBUG: Log raw output (temporary for debugging)
             logger.debug(f"Raw model output (first 200 chars): {ai_response[:200]}")
             
-            # Parse AI response using extract_json
+            # Parse AI response using extract_json_safe
             try:
-                ai_analysis = extract_json(ai_response)
+                ai_analysis = extract_json_safe(ai_response)
             except ValueError as e:
                 logger.error(f"Failed to parse AI response as JSON: {e}")
                 logger.error(f"Response was: {ai_response[:200]}")
                 # Create default analysis (new format)
                 ai_analysis = {
-                    "hook_score": 5,
-                    "retention_score": 5,
-                    "emotion_score": 5,
-                    "relatability_score": 5,
-                    "completion_score": 5,
-                    "platform_fit_score": 5,
-                    "final_score": 50,
+                    "hook_score": 0,
+                    "retention_score": 0,
+                    "emotion_score": 0,
+                    "relatability_score": 0,
+                    "completion_score": 0,
+                    "platform_fit_score": 0,
+                    "final_score": 0,
                     "verdict": "skip",
-                    "key_strengths": ["AI analysis failed"],
-                    "key_weaknesses": ["Unable to parse response"],
-                    "first_3_seconds": segment["text"][:100],
+                    "key_strengths": [],
+                    "key_weaknesses": ["AI analysis failed - Unable to parse response"],
+                    "first_3_seconds": segment["text"][:100] if segment.get("text") else "",
                     "primary_emotion": "neutral",
                     "optimal_platform": "none"
                 }
             
             # Map new format to existing structure for backward compatibility
             # Check if using new format (direct keys) or old format (nested)
-            if "hook_score" in ai_analysis:
-                # New viral evaluation format
-                final_score = ai_analysis.get("final_score", 0)
-                verdict = ai_analysis.get("verdict", "skip")
+            if "hook_score" in ai_analysis or "scores" in ai_analysis:
+                # Extract scores safely with fallbacks
+                hook_score = extract_score_safe(ai_analysis, "hook_score", 0.0)
+                retention_score = extract_score_safe(ai_analysis, "retention_score", 0.0)
+                emotion_score = extract_score_safe(ai_analysis, "emotion_score", 0.0)
+                relatability_score = extract_score_safe(ai_analysis, "relatability_score", 0.0)
+                completion_score = extract_score_safe(ai_analysis, "completion_score", 0.0)
+                platform_fit_score = extract_score_safe(ai_analysis, "platform_fit_score", 0.0)
+                
+                # Extract final score with fallback calculation
+                final_score = extract_score_safe(ai_analysis, "final_score", 0.0)
+                
+                # If final_score not provided, calculate weighted average
+                if final_score == 0.0 and any([hook_score, retention_score, emotion_score]):
+                    final_score = (
+                        hook_score * 0.35 +
+                        retention_score * 0.25 +
+                        emotion_score * 0.20 +
+                        completion_score * 0.15 +
+                        platform_fit_score * 0.05 +
+                        relatability_score * 0.05
+                    ) * 10.0  # Scale to 0-100
                 
                 # Convert final_score (0-100) to overall_score (0-10) for compatibility
                 overall_score = final_score / 10.0
+                verdict = ai_analysis.get("verdict", "skip")
                 
                 scored_segment = {
                     **segment,
                     "ai_analysis": ai_analysis,
                     "overall_score": overall_score,
-                    "hook_score": ai_analysis.get("hook_score", 0),
-                    "retention_score": ai_analysis.get("retention_score", 0),
-                    "emotion_score": ai_analysis.get("emotion_score", 0),
-                    "relatability_score": ai_analysis.get("relatability_score", 0),
-                    "completion_score": ai_analysis.get("completion_score", 0),
-                    "platform_fit_score": ai_analysis.get("platform_fit_score", 0),
+                    "hook_score": hook_score,
+                    "retention_score": retention_score,
+                    "emotion_score": emotion_score,
+                    "relatability_score": relatability_score,
+                    "completion_score": completion_score,
+                    "platform_fit_score": platform_fit_score,
                     "final_score": final_score,
                     "verdict": verdict,
                     "key_strengths": ai_analysis.get("key_strengths", []),
@@ -254,11 +301,11 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                     "optimal_platform": ai_analysis.get("optimal_platform", "none")
                 }
                 
-                logger.info(f"[OK] Segment {idx + 1}: score={final_score}/100, verdict={verdict}")
+                logger.info(f"[OK] Segment {idx + 1}: final_score={final_score:.1f}/100, verdict={verdict}")
             else:
-                # Old format fallback (nested scores)
+                # Old format fallback (nested scores) - shouldn't happen with new prompt
                 scores = ai_analysis.get("scores", {})
-                overall_score = ai_analysis.get("overall_score", 5.0)
+                overall_score = ai_analysis.get("overall_score", 0.0)
                 
                 scored_segment = {
                     **segment,
