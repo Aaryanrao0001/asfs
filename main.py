@@ -367,7 +367,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         should_skip_scoring = (
             use_cache and 
             cache.has_completed_stage(pipeline_state, 'ai_scoring') and
-            not cache.should_invalidate_ai_scoring(video_path, config['model'])
+            not cache.should_invalidate_ai_scoring(video_path, config['model'], pipeline_state)
         )
         
         if should_skip_scoring:
@@ -381,7 +381,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
             # Log reason for re-scoring
             if not use_cache:
                 logger.info("Cache disabled via --no-cache flag")
-            elif cache.should_invalidate_ai_scoring(video_path, config['model']):
+            elif cache.should_invalidate_ai_scoring(video_path, config['model'], pipeline_state):
                 logger.info("Re-running AI scoring due to config changes")
             
             audit.log_pipeline_event("ai_scoring", "started", video_path)

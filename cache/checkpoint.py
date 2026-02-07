@@ -219,22 +219,26 @@ class PipelineCache:
         
         return stage in state and state[stage].get('completed', False)
     
-    def should_invalidate_ai_scoring(self, video_path: str, current_config: dict) -> bool:
+    def should_invalidate_ai_scoring(self, video_path: str, current_config: dict, state: Optional[Dict] = None) -> bool:
         """
         Check if AI scoring cache should be invalidated.
         
         Returns True if any of these changed:
-        - Model config (endpoint, model name, temperature)
+        - Model config (endpoint, model name)
         - Score threshold
         
         Args:
             video_path: Path to input video
             current_config: Current model configuration
+            state: Optional pre-loaded pipeline state (to avoid re-loading)
             
         Returns:
             True if cache should be invalidated
         """
-        state = self.load_state(video_path)
+        # Load state if not provided
+        if state is None:
+            state = self.load_state(video_path)
+        
         if not state or "ai_scoring" not in state:
             return False  # No cache, no need to invalidate
         
