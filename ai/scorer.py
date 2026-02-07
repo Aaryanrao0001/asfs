@@ -383,7 +383,20 @@ CRITICAL: You MUST respond with ONLY valid JSON.
     logger.info(f"Completed scoring {len(scored_segments)} segments")
     
     if scored_segments:
-        top_score = scored_segments[0].get("overall_score", 0)
-        logger.info(f"Top segment score: {top_score:.1f}/10")
+        # Calculate statistics
+        scores = [s.get("overall_score", 0.0) for s in scored_segments]
+        final_scores = [s.get("final_score", 0.0) for s in scored_segments]
+        max_score = max(scores)
+        avg_score = sum(scores) / len(scores) if scores else 0
+        max_final = max(final_scores)
+        avg_final = sum(final_scores) / len(final_scores) if final_scores else 0
+        
+        # Count high-quality segments
+        high_quality = sum(1 for s in scores if s >= 6.0)
+        
+        logger.info(f"Scoring complete: max={max_score:.1f}/10 (final={max_final:.1f}/100), avg={avg_score:.1f}/10 (final={avg_final:.1f}/100)")
+        logger.info(f"High-quality segments (score >= 6.0): {high_quality}")
+    else:
+        logger.warning("No segments scored successfully")
     
     return scored_segments
