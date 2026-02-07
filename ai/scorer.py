@@ -5,6 +5,7 @@ import json
 import re
 import logging
 import time
+import random
 from typing import List, Dict
 from pathlib import Path
 
@@ -152,7 +153,7 @@ def create_batch_prompt(segments: List[Dict], prompt_template: str) -> str:
     Create a batch scoring prompt for multiple segments.
     
     Args:
-        segments: List of 5-8 segments to score together
+        segments: List of segments to score together (batch size is configurable)
         prompt_template: Base template
         
     Returns:
@@ -276,6 +277,35 @@ def save_pipeline_state(scored_segments: List[Dict], remaining_segments: List[Di
         json.dump(state, f, indent=2)
     
     logger.info(f"Pipeline state saved to {output_path}")
+
+
+def extract_retry_after(api_error) -> int:
+    """
+    Extract retry-after value from API error response.
+    
+    Args:
+        api_error: Exception from API call
+        
+    Returns:
+        Retry-after value in seconds, or None if not found
+    """
+    retry_after = None
+    
+    # Try to get from response headers (standard HTTP header)
+    if hasattr(api_error, 'response') and hasattr(api_error.response, 'headers'):
+        retry_after_header = api_error.response.headers.get('retry-after') or \
+                           api_error.response.headers.get('Retry-After')
+        if retry_after_header:
+            try:
+                retry_after = int(retry_after_header)
+            except (ValueError, TypeError):
+                pass
+    
+    # Fallback: try direct attribute (some SDKs may expose it directly)
+    if retry_after is None:
+        retry_after = getattr(api_error, 'retry_after', None)
+    
+    return retry_after
 
 
 def process_single_segment_response(segment: Dict, ai_analysis: Dict, idx: int) -> Dict:
@@ -543,7 +573,7 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                         # Check if it's a 429 rate limit error
                         if hasattr(api_error, 'status_code') and api_error.status_code == 429:
                             # Extract retry-after from headers
-                            retry_after = getattr(api_error, 'retry_after', None)
+                            retry_after = extract_retry_after(api_error)
                             if retry_after and retry_after > max_cooldown_threshold:
                                 logger.error(f"Rate limit exceeded with long cooldown ({retry_after}s). Stopping scoring.")
                                 # Save state
@@ -552,14 +582,12 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                                 return scored_segments
                             
                             # Add jitter to prevent thundering herd
-                            import random
                             sleep_time = (retry_after or 10) + random.uniform(1, 5)
                             logger.warning(f"Rate limited. Sleeping for {sleep_time:.1f}s")
                             time.sleep(sleep_time)
                             continue
                         
                         if attempt < max_retries:
-                            import random
                             backoff = min(300, (2 ** attempt) + random.uniform(0, 1))
                             logger.warning(f"API call failed for segment {idx + 1}, retrying in {backoff:.1f}s... ({api_error})")
                             time.sleep(backoff)
@@ -648,21 +676,19 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                     except Exception as api_error:
                         # Check if it's a 429 rate limit error
                         if hasattr(api_error, 'status_code') and api_error.status_code == 429:
-                            retry_after = getattr(api_error, 'retry_after', None)
+                            retry_after = extract_retry_after(api_error)
                             if retry_after and retry_after > max_cooldown_threshold:
                                 logger.error(f"Rate limit exceeded with long cooldown ({retry_after}s). Stopping scoring.")
                                 remaining = segments_to_score[batch_start:]
                                 save_pipeline_state(scored_segments, remaining)
                                 return scored_segments
                             
-                            import random
                             sleep_time = (retry_after or 10) + random.uniform(1, 5)
                             logger.warning(f"Rate limited. Sleeping for {sleep_time:.1f}s")
                             time.sleep(sleep_time)
                             continue
                         
                         if attempt < max_retries:
-                            import random
                             backoff = min(300, (2 ** attempt) + random.uniform(0, 1))
                             logger.warning(f"API call failed for batch starting at {batch_start + 1}, retrying in {backoff:.1f}s... ({api_error})")
                             time.sleep(backoff)
