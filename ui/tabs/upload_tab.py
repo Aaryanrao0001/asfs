@@ -290,7 +290,17 @@ class UploadTab(QWidget):
             page = browser.launch(headless=False)
             
             # Navigate to Google
-            page.goto("https://accounts.google.com", wait_until="networkidle")
+            try:
+                page.goto("https://accounts.google.com", wait_until="networkidle", timeout=30000)
+            except Exception as nav_error:
+                browser.close()
+                raise RuntimeError(
+                    f"Failed to navigate to Google:\n{str(nav_error)}\n\n"
+                    "This could indicate:\n"
+                    "- Network connectivity issues\n"
+                    "- Profile configuration problems\n"
+                    "- Brave browser issues"
+                )
             
             # Wait 15 seconds for user to check
             import time

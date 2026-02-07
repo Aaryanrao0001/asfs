@@ -51,6 +51,7 @@ class BraveBrowserBase:
         self.user_data_dir = user_data_dir
         self.profile_directory = profile_directory
         self.playwright: Optional[Playwright] = None
+        self.browser: Optional[Browser] = None  # For fallback mode without user_data_dir
         self.context = None  # Changed from browser to context for persistent context
         self.page: Optional[Page] = None
         
@@ -218,19 +219,18 @@ class BraveBrowserBase:
                 "This may cause login failures on Google and other platforms.\n"
                 "Specify user_data_dir and profile_directory for production use."
             )
-            browser = self.playwright.chromium.launch(
+            self.browser = self.playwright.chromium.launch(
                 executable_path=self.brave_path,
                 headless=headless,
                 args=launch_args
             )
             
-            context = browser.new_context(
+            self.context = self.browser.new_context(
                 viewport={"width": 1280, "height": 720},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
             
-            self.context = context
-            self.page = context.new_page()
+            self.page = self.context.new_page()
         
         logger.info("Brave browser launched successfully")
         
@@ -242,6 +242,8 @@ class BraveBrowserBase:
             self.page.close()
         if self.context:
             self.context.close()
+        if self.browser:  # For fallback mode
+            self.browser.close()
         if self.playwright:
             self.playwright.stop()
         
