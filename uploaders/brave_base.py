@@ -142,7 +142,7 @@ class BraveBrowserBase:
                 f"Set BRAVE_PROFILE_DIRECTORY to one of the above in .env file."
             )
         
-        logger.info(f"✅ Validated Brave profile: {profile_full_path}")
+        logger.info(f"[OK] Validated Brave profile: {profile_full_path}")
     
     @staticmethod
     def get_available_profiles(user_data_dir: str) -> list:
@@ -238,10 +238,12 @@ class BraveBrowserBase:
         
         self.playwright = sync_playwright().start()
         
-        # Build launch arguments for anti-detection
+        # Build launch arguments for anti-detection and compatibility
         launch_args = [
             "--disable-blink-features=AutomationControlled",  # Hide automation
             "--start-maximized",  # Better UX
+            "--disable-brave-update",  # Prevent update popups
+            "--disable-features=BraveRewards",  # Disable rewards that might interfere
         ]
         
         # CRITICAL: Use launch_persistent_context() to reuse real profile
@@ -257,7 +259,7 @@ class BraveBrowserBase:
             
             # Persistent context with real profile
             self.context = self.playwright.chromium.launch_persistent_context(
-                user_data_dir=profile_path,  # ✅ FULL PATH TO PROFILE
+                user_data_dir=profile_path,  # FULL PATH TO PROFILE
                 executable_path=self.brave_path,
                 headless=headless,
                 
@@ -331,10 +333,10 @@ class BraveBrowserBase:
             
             # Check if User Data directory matches expected path
             if self.user_data_dir and self.user_data_dir in content:
-                logger.info("✅ VERIFIED: Real Brave profile loaded successfully")
+                logger.info("[OK] VERIFIED: Real Brave profile loaded successfully")
                 result = True
             else:
-                logger.error("❌ FAILED: Temporary profile detected! User Data dir mismatch")
+                logger.error("[FAIL] FAILED: Temporary profile detected! User Data dir mismatch")
                 logger.error(f"Expected: {self.user_data_dir}")
                 result = False
             
@@ -408,8 +410,8 @@ class BraveBrowserBase:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
         
-        # Wait for file input
-        file_input = self.page.wait_for_selector(selector, timeout=10000)
+        # Wait for file input (use state="attached" to handle hidden inputs)
+        file_input = self.page.wait_for_selector(selector, state="attached", timeout=10000)
         
         # Set files
         file_input.set_input_files(file_path)

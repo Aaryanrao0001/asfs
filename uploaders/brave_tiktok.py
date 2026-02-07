@@ -46,9 +46,22 @@ def upload_to_tiktok_browser(
         browser = BraveBrowserBase(brave_path, user_data_dir, profile_directory)
         page = browser.launch(headless=False)
         
-        # Navigate to TikTok upload page
+        # Navigate to TikTok upload page with network error handling
         logger.info("Navigating to TikTok upload page")
-        page.goto("https://www.tiktok.com/upload", wait_until="networkidle")
+        try:
+            page.goto("https://www.tiktok.com/upload", wait_until="networkidle", timeout=30000)
+        except Exception as nav_error:
+            error_msg = str(nav_error).lower()
+            if "net::" in error_msg or "timeout" in error_msg:
+                logger.error("[FAIL] Network error accessing TikTok - possible causes:")
+                logger.error("  1. Internet connection issue")
+                logger.error("  2. TikTok may be blocked in your region")
+                logger.error("  3. Firewall or antivirus blocking access")
+                logger.error("  4. TikTok service may be temporarily down")
+                raise Exception(f"Network error: Cannot reach TikTok upload page - {nav_error}")
+            else:
+                raise
+        
         browser.human_delay(2, 4)
         
         # Check if user is logged in
@@ -227,9 +240,22 @@ def _upload_to_tiktok_with_manager(
         manager = BraveBrowserManager.get_instance()
         page = manager.get_page()
         
-        # Navigate to TikTok upload page
+        # Navigate to TikTok upload page with network error handling
         logger.info("Navigating to TikTok upload page")
-        page.goto("https://www.tiktok.com/upload", wait_until="networkidle")
+        try:
+            page.goto("https://www.tiktok.com/upload", wait_until="networkidle", timeout=30000)
+        except Exception as nav_error:
+            error_msg = str(nav_error).lower()
+            if "net::" in error_msg or "timeout" in error_msg:
+                logger.error("[FAIL] Network error accessing TikTok - possible causes:")
+                logger.error("  1. Internet connection issue")
+                logger.error("  2. TikTok may be blocked in your region")
+                logger.error("  3. Firewall or antivirus blocking access")
+                logger.error("  4. TikTok service may be temporarily down")
+                raise Exception(f"Network error: Cannot reach TikTok upload page - {nav_error}")
+            else:
+                raise
+        
         page.wait_for_timeout(random.randint(2000, 4000))
         
         # Check if user is logged in
@@ -243,12 +269,12 @@ def _upload_to_tiktok_with_manager(
         logger.info("Uploading video file")
         try:
             file_input_selector = 'input[type="file"]'
-            file_input = page.wait_for_selector(file_input_selector, timeout=10000)
+            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=10000)
             file_input.set_input_files(video_path)
         except Exception as e:
             logger.warning(f"Primary file selector failed, trying alternative: {e}")
             file_input_selector = '[data-e2e="upload-input"]'
-            file_input = page.wait_for_selector(file_input_selector, timeout=10000)
+            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=10000)
             file_input.set_input_files(video_path)
         
         page.wait_for_timeout(random.randint(3000, 5000))

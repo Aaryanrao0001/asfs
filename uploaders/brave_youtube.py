@@ -316,12 +316,14 @@ def _upload_to_youtube_with_manager(
         # Upload video file
         logger.info("Uploading video file")
         try:
+            # YouTube hides file inputs, so use state="attached" instead of visible
             file_input_selector = 'input[type="file"][name="Filedata"]'
-            file_input = page.wait_for_selector(file_input_selector, timeout=10000)
+            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=10000)
             file_input.set_input_files(video_path)
         except Exception as e:
             logger.warning(f"Primary file selector failed: {e}")
-            file_input = page.wait_for_selector('input[type="file"]', timeout=10000)
+            # Fallback to any file input (hidden or visible)
+            file_input = page.wait_for_selector('input[type="file"]', state="attached", timeout=10000)
             file_input.set_input_files(video_path)
         
         page.wait_for_timeout(random.randint(3000, 5000))

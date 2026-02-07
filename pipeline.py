@@ -650,6 +650,22 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                 
                 logger.info(f"\nUploading {clip_id} to {platform}...")
                 
+                # Validate browser context is still alive before each upload
+                if not browser_manager.is_alive():
+                    logger.error("[WARN] Browser context died, attempting to reinitialize...")
+                    try:
+                        browser_manager.close()
+                        browser_manager.initialize(
+                            brave_path=brave_path,
+                            user_data_dir=brave_user_data_dir,
+                            profile_directory=brave_profile_directory
+                        )
+                        logger.info("[OK] Browser context reinitialized successfully")
+                    except Exception as reinit_error:
+                        logger.error(f"[FAIL] Failed to reinitialize browser: {reinit_error}")
+                        logger.error("Stopping uploads - browser cannot be recovered")
+                        break
+                
                 # Check if upload is allowed (rate limiting)
                 if not queue.can_upload(platform):
                     logger.info(f"Rate limit reached for {platform}, skipping for now")
@@ -688,10 +704,12 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                         failed_uploads += 1
                     
                 except Exception as e:
-                    logger.error(f"[FAIL] Upload error: {str(e)}")
+                    logger.error(f"[FAIL] Upload error for {platform}: {str(e)}")
                     queue.record_upload(platform, clip_id, success=False)
                     audit.log_upload_event(clip_id, platform, "failed", error_message=str(e))
                     failed_uploads += 1
+                    # Continue to next upload instead of breaking
+                    continue
         
         finally:
             # Close browser manager after all uploads complete

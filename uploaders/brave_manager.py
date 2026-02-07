@@ -164,6 +164,28 @@ class BraveBrowserManager:
         except Exception as e:
             logger.warning(f"Failed to navigate to about:blank: {e}")
     
+    def is_alive(self) -> bool:
+        """
+        Check if browser context is still alive and usable.
+        
+        Returns:
+            True if browser context is alive and responsive, False otherwise
+        """
+        try:
+            if not self.is_initialized:
+                return False
+            if not self.browser_base or not self.browser_base.context:
+                return False
+            if not self.browser_base.page:
+                return False
+            
+            # Test if page is responsive by evaluating simple JavaScript
+            self.browser_base.page.evaluate("1 + 1")
+            return True
+        except Exception as e:
+            logger.warning(f"Browser context health check failed: {e}")
+            return False
+    
     def close(self):
         """
         Close the shared browser instance and cleanup.
