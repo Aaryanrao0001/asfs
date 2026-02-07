@@ -282,6 +282,7 @@ class UploadTab(QWidget):
                 f"Opening Google in Brave to test profile...\n\n"
                 f"User Data Dir: {user_data_dir}\n"
                 f"Profile: {profile_directory}\n\n"
+                f"NOTE: Any running Brave processes will be automatically closed.\n"
                 f"Check if you're logged into Google.\n"
                 f"The browser will close automatically in 15 seconds."
             )
