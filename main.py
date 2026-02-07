@@ -375,8 +375,24 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
             # Load cached scores
             scored_segments = cache.get_stage_result(pipeline_state, 'ai_scoring', 'scored_segments')
             logger.info(f"[OK] SKIPPED (using cached result): {len(scored_segments)} scored segments")
-            cache_hit = True
-        else:
+            
+            # Additional validation: check if all cached scores are 0
+            if scored_segments:
+                all_zero = all(
+                    seg.get("overall_score", 0) == 0 and seg.get("final_score", 0) == 0
+                    for seg in scored_segments
+                )
+                if all_zero:
+                    logger.warning("Cached scores are all 0 - this should have been caught by cache invalidation")
+                    logger.warning("Force re-scoring despite cache...")
+                    cache_hit = False
+                    should_skip_scoring = False
+                else:
+                    cache_hit = True
+            else:
+                cache_hit = True
+        
+        if not should_skip_scoring:
             cache_hit = False
             
             # Log reason for re-scoring
@@ -436,11 +452,19 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                 logger.warning(f"  Max: {max(scores):.1f}")
                 logger.warning(f"  Avg: {sum(scores)/len(scores):.1f}")
                 logger.warning(f"  Min: {min(scores):.1f}")
+                
+                # Extra warning if all scores are 0
+                if max(scores) == 0:
+                    logger.warning("")
+                    logger.warning("All scores are 0! This indicates a problem with AI scoring:")
+                    logger.warning("  - Verify GITHUB_TOKEN environment variable is set and valid")
+                    logger.warning("  - Check API key has access to the model endpoint")
+                    logger.warning("  - Review logs above for API or JSON parsing errors")
             
             logger.warning("To get clips:")
-            logger.warning("  1. Lower min_score_threshold in config/model.yaml")
+            logger.warning("  1. If scores are all 0: Check API key validity and permissions")
+            logger.warning("  2. Lower min_score_threshold in config/model.yaml")
             logger.warning("     (Cache will auto-invalidate and re-score)")
-            logger.warning("  2. Fix AI scoring JSON parsing (if scores are all 0)")
             logger.warning("  3. Use --no-cache to force complete re-processing")
             logger.info("=" * 80)
             

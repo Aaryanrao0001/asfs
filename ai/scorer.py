@@ -4,6 +4,7 @@ import os
 import json
 import re
 import logging
+import time
 from typing import List, Dict
 from pathlib import Path
 
@@ -231,42 +232,69 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                 .replace("{{DURATION}}", f"{segment['duration']:.1f}")
             )
             
-            # Call AI model
-            if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
-                response = client.complete(
-                    messages=[
-                        {"role": "system", "content": system_message},
-                        {"role": "user", "content": prompt}
-                    ],
-                    model=model_name,
-                    temperature=0.7,
-                    max_tokens=500
-                )
-                
-                ai_response = response.choices[0].message.content
-                
-            else:  # OpenAI SDK
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_message},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=500
-                )
-                
-                ai_response = response.choices[0].message.content
+            # Call AI model with retry logic (1 retry on API failures)
+            ai_response = None
+            api_call_succeeded = False
+            max_retries = 1
             
-            # DEBUG: Log raw output (temporary for debugging)
-            logger.debug(f"Raw model output (first 200 chars): {ai_response[:200]}")
+            for attempt in range(max_retries + 1):
+                try:
+                    if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
+                        response = client.complete(
+                            messages=[
+                                {"role": "system", "content": system_message},
+                                {"role": "user", "content": prompt}
+                            ],
+                            model=model_name,
+                            temperature=0.7,
+                            max_tokens=1024,
+                            response_format={"type": "json_object"}
+                        )
+                        
+                        ai_response = response.choices[0].message.content
+                        
+                    else:  # OpenAI SDK
+                        response = client.chat.completions.create(
+                            model=model_name,
+                            messages=[
+                                {"role": "system", "content": system_message},
+                                {"role": "user", "content": prompt}
+                            ],
+                            temperature=0.7,
+                            max_tokens=1024,
+                            response_format={"type": "json_object"}
+                        )
+                        
+                        ai_response = response.choices[0].message.content
+                    
+                    # API call succeeded
+                    api_call_succeeded = True
+                    break
+                    
+                except Exception as api_error:
+                    if attempt < max_retries:
+                        logger.warning(f"API call failed for segment {idx + 1}, retrying... ({api_error})")
+                        time.sleep(2)  # Brief delay before retry
+                    else:
+                        logger.error(f"API call failed for segment {idx + 1} after {max_retries + 1} attempts: {api_error}")
+                        raise  # Re-raise to be caught by outer exception handler
+            
+            if not api_call_succeeded or ai_response is None:
+                raise RuntimeError("API call failed and no response received")
+            
+            # Log raw output for first segment at INFO level, others at DEBUG
+            if idx == 0:
+                logger.info(f"Raw model output for first segment (first 300 chars): {ai_response[:300]}")
+            else:
+                logger.debug(f"Raw model output (first 200 chars): {ai_response[:200]}")
             
             # Parse AI response using extract_json_safe
             try:
                 ai_analysis = extract_json_safe(ai_response)
+                logger.info(f"[OK] JSON parsed successfully for segment {idx + 1}")
             except ValueError as e:
-                logger.error(f"Failed to parse AI response as JSON: {e}")
-                logger.error(f"Response was: {ai_response[:200]}")
+                logger.warning(f"[FAIL] Failed to parse AI response as JSON for segment {idx + 1}: {e}")
+                logger.warning(f"Response preview: {ai_response[:300]}")
                 # Create default analysis (new format)
                 ai_analysis = {
                     "hook_score": 0,
@@ -306,7 +334,7 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                         hook_score * 0.35 +
                         retention_score * 0.25 +
                         emotion_score * 0.20 +
-                        completion_score * 0.15 +
+                        completion_score * 0.10 +
                         platform_fit_score * 0.05 +
                         relatability_score * 0.05
                     ) * 10.0  # Scale from 0-10 range to 0-100 range
@@ -401,6 +429,17 @@ CRITICAL: You MUST respond with ONLY valid JSON.
         
         logger.info(f"Scoring complete: max={max_score:.1f}/10 (final={max_final:.1f}/100), avg={avg_score:.1f}/10 (final={avg_final:.1f}/100)")
         logger.info(f"High-quality segments (score >= {min_score_threshold}): {high_quality}")
+        
+        # Sanity check: warn if ALL segments scored 0
+        if max_score == 0 and max_final == 0:
+            logger.warning("=" * 80)
+            logger.warning("WARNING: ALL SEGMENTS SCORED 0!")
+            logger.warning("This likely indicates an API or parsing issue:")
+            logger.warning("  1. Check if API key is valid and has correct permissions")
+            logger.warning("  2. Check if model endpoint is accessible")
+            logger.warning("  3. Review raw model output logs above for errors")
+            logger.warning("  4. Verify response_format is supported by the model")
+            logger.warning("=" * 80)
     else:
         logger.warning("No segments scored successfully")
     
