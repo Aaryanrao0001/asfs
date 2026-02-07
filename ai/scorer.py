@@ -26,33 +26,34 @@ except ImportError:
     OPENAI_SDK_AVAILABLE = False
 
 
-def safe_json_parse(text: str) -> dict:
+def extract_json(text: str) -> dict:
     """
-    Extract and parse JSON from model response.
+    Extract and parse the first JSON object found in model response.
     
-    Handles cases where the model wraps JSON in:
-    - Markdown code blocks (```json ... ```)
-    - Extra whitespace or newlines
-    - Explanatory text before/after JSON
+    Handles cases where model wraps JSON in:
+    - Whitespace/newlines
+    - Markdown code blocks
+    - Explanatory text
     
     Args:
-        text: Raw model response
+        text: Raw model response string
         
     Returns:
         Parsed JSON dictionary
         
     Raises:
-        ValueError: If no valid JSON found
+        ValueError: If no valid JSON found or parsing fails
     """
     # Remove markdown code blocks if present
     text = re.sub(r'```json\s*', '', text)
     text = re.sub(r'```\s*', '', text)
     
-    # Try to find JSON object by counting braces to handle nested objects
+    # Find start of JSON object
     start_idx = text.find('{')
     if start_idx == -1:
         raise ValueError(f"No JSON object found in model output: {text[:200]}")
     
+    # Count braces to find matching closing brace
     brace_count = 0
     end_idx = start_idx
     
@@ -66,19 +67,14 @@ def safe_json_parse(text: str) -> dict:
                 break
     
     if brace_count != 0:
-        raise ValueError(f"Unbalanced braces in JSON object: {text[start_idx:start_idx+200]}")
+        raise ValueError(f"Unbalanced braces in JSON: {text[start_idx:start_idx+200]}")
     
     json_str = text[start_idx:end_idx]
     
     try:
         return json.loads(json_str)
     except json.JSONDecodeError as e:
-        # Show context around the error position
-        error_pos = getattr(e, 'pos', 0)
-        context_start = max(0, error_pos - 50)
-        context_end = min(len(json_str), error_pos + 50)
-        context = json_str[context_start:context_end]
-        raise ValueError(f"Invalid JSON in model output: {e}\nContext: ...{context}...")
+        raise ValueError(f"Invalid JSON: {e}\nExtracted: {json_str[:200]}")
 
 
 
@@ -203,9 +199,12 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                 
                 ai_response = response.choices[0].message.content
             
-            # Parse AI response using safe parser
+            # DEBUG: Log raw output (temporary for debugging)
+            logger.debug(f"Raw model output (first 200 chars): {ai_response[:200]}")
+            
+            # Parse AI response using extract_json
             try:
-                ai_analysis = safe_json_parse(ai_response)
+                ai_analysis = extract_json(ai_response)
             except ValueError as e:
                 logger.error(f"Failed to parse AI response as JSON: {e}")
                 logger.error(f"Response was: {ai_response[:200]}")
@@ -255,8 +254,7 @@ CRITICAL: You MUST respond with ONLY valid JSON.
                     "optimal_platform": ai_analysis.get("optimal_platform", "none")
                 }
                 
-                logger.info(f"Scored segment {idx + 1}/{len(segments_to_score)}: "
-                           f"{final_score}/100 ({verdict.upper()})")
+                logger.info(f"[OK] Segment {idx + 1}: score={final_score}/100, verdict={verdict}")
             else:
                 # Old format fallback (nested scores)
                 scores = ai_analysis.get("scores", {})
@@ -278,14 +276,23 @@ CRITICAL: You MUST respond with ONLY valid JSON.
             
         except Exception as e:
             logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
-            # Add segment without AI score
+            # Add fallback with zero scores
+            # Note: final_score appears both in ai_analysis and top-level for backward compatibility
             scored_segments.append({
                 **segment,
                 "ai_analysis": {
                     "error": str(e),
-                    "overall_score": 0.0
+                    "final_score": 0
                 },
-                "overall_score": 0.0
+                "overall_score": 0.0,
+                "final_score": 0,  # Top-level for easy access
+                "verdict": "skip",
+                "hook_score": 0,
+                "retention_score": 0,
+                "emotion_score": 0,
+                "relatability_score": 0,
+                "completion_score": 0,
+                "platform_fit_score": 0
             })
     
     # Sort by overall score (highest first)

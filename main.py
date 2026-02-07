@@ -41,6 +41,7 @@ from scheduler import UploadQueue
 from scheduler.queue import load_rate_limits
 from uploaders import upload_to_tiktok, upload_to_instagram, upload_to_youtube
 from audit import AuditLogger
+from cache import PipelineCache
 
 
 # Configure logging
@@ -90,13 +91,14 @@ def load_config() -> Dict:
     return config
 
 
-def run_pipeline(video_path: str, output_dir: str = "output"):
+def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = True):
     """
     Run the complete pipeline.
     
     Args:
         video_path: Path to input video
         output_dir: Directory for output files
+        use_cache: Enable caching to resume from last completed stage (default: True)
     """
     logger.info("=" * 80)
     logger.info("AUTOMATED SHORT-FORM CONTENT CLIPPING PIPELINE")
@@ -110,6 +112,26 @@ def run_pipeline(video_path: str, output_dir: str = "output"):
     # Load configuration
     logger.info("Loading configuration...")
     config = load_config()
+    
+    # Initialize pipeline cache
+    cache = PipelineCache(cache_dir=os.path.join(output_dir, "cache"))
+    pipeline_state = {}
+    
+    # Try to load cached state if caching is enabled
+    if use_cache:
+        logger.info("\n" + "=" * 80)
+        logger.info("CHECKING FOR CACHED STATE")
+        logger.info("=" * 80)
+        cached_state = cache.load_state(video_path)
+        
+        if cached_state:
+            pipeline_state = cached_state
+            logger.info("✓ Will resume from last completed stage")
+            logger.info("  (Use --no-cache to force full reprocessing)")
+        else:
+            logger.info("✓ No cache found - starting fresh")
+    else:
+        logger.info("✓ Cache disabled - starting fresh pipeline")
     
     # Initialize audit logger
     audit = AuditLogger()
@@ -126,36 +148,88 @@ def run_pipeline(video_path: str, output_dir: str = "output"):
         logger.info("\n" + "=" * 80)
         logger.info("STAGE 1: AUDIO EXTRACTION")
         logger.info("=" * 80)
-        audit.log_pipeline_event("audio_extraction", "started", video_path)
         
-        try:
-            audio_path = extract_audio(video_path, work_dir)
-            logger.info(f"[OK] Audio extracted: {audio_path}")
-            audit.log_pipeline_event("audio_extraction", "completed", audio_path)
-        except Exception as e:
-            logger.error(f"[FAIL] Audio extraction failed: {str(e)}")
-            audit.log_pipeline_event("audio_extraction", "failed", video_path, 
-                                    error_message=str(e))
-            raise
+        # Check if this stage is cached
+        if cache.has_completed_stage(pipeline_state, 'audio_extraction'):
+            audio_path = cache.get_stage_result(pipeline_state, 'audio_extraction', 'audio_path')
+            logger.info(f"✓ SKIPPED (using cached result): {audio_path}")
+            
+            # Verify file still exists
+            if not os.path.exists(audio_path):
+                logger.warning("Cached audio file not found, re-extracting...")
+                cache_hit = False
+            else:
+                cache_hit = True
+        else:
+            cache_hit = False
+        
+        if not cache_hit:
+            audit.log_pipeline_event("audio_extraction", "started", video_path)
+            
+            try:
+                audio_path = extract_audio(video_path, work_dir)
+                logger.info(f"[OK] Audio extracted: {audio_path}")
+                audit.log_pipeline_event("audio_extraction", "completed", audio_path)
+                
+                # Save to cache
+                if use_cache:
+                    pipeline_state['audio_extraction'] = {
+                        'completed': True,
+                        'audio_path': audio_path
+                    }
+                    cache.save_state(video_path, pipeline_state, 'audio_extraction')
+                    
+            except Exception as e:
+                logger.error(f"[FAIL] Audio extraction failed: {str(e)}")
+                audit.log_pipeline_event("audio_extraction", "failed", video_path, 
+                                        error_message=str(e))
+                raise
         
         # Stage 2: Transcript Generation (uses audio, not video)
         logger.info("\n" + "=" * 80)
         logger.info("STAGE 2: TRANSCRIPT GENERATION")
         logger.info("=" * 80)
-        audit.log_pipeline_event("transcription", "started", audio_path)
         
-        try:
-            transcript_path = transcribe_video(audio_path, work_dir)
-            logger.info(f"[OK] Transcript saved: {transcript_path}")
+        # Check if this stage is cached
+        if cache.has_completed_stage(pipeline_state, 'transcription'):
+            transcript_path = cache.get_stage_result(pipeline_state, 'transcription', 'transcript_path')
+            logger.info(f"✓ SKIPPED (using cached result): {transcript_path}")
             
-            transcript_data = load_transcript(transcript_path)
-            audit.log_pipeline_event("transcription", "completed", audio_path,
-                                    {"segments": len(transcript_data.get("segments", []))})
-        except Exception as e:
-            logger.error(f"[FAIL] Transcription failed: {str(e)}")
-            audit.log_pipeline_event("transcription", "failed", video_path,
-                                    error_message=str(e))
-            raise
+            # Verify file still exists
+            if not os.path.exists(transcript_path):
+                logger.warning("Cached transcript file not found, re-transcribing...")
+                cache_hit = False
+            else:
+                transcript_data = load_transcript(transcript_path)
+                cache_hit = True
+        else:
+            cache_hit = False
+        
+        if not cache_hit:
+            audit.log_pipeline_event("transcription", "started", audio_path)
+            
+            try:
+                transcript_path = transcribe_video(audio_path, work_dir)
+                logger.info(f"[OK] Transcript saved: {transcript_path}")
+                
+                transcript_data = load_transcript(transcript_path)
+                audit.log_pipeline_event("transcription", "completed", audio_path,
+                                        {"segments": len(transcript_data.get("segments", []))})
+                
+                # Save to cache
+                if use_cache:
+                    pipeline_state['transcription'] = {
+                        'completed': True,
+                        'transcript_path': transcript_path,
+                        'segment_count': len(transcript_data.get("segments", []))
+                    }
+                    cache.save_state(video_path, pipeline_state, 'transcription')
+                    
+            except Exception as e:
+                logger.error(f"[FAIL] Transcription failed: {str(e)}")
+                audit.log_pipeline_event("transcription", "failed", video_path,
+                                        error_message=str(e))
+                raise
         
         # Stage 3: Transcript Quality Check
         logger.info("\n" + "=" * 80)
@@ -185,28 +259,49 @@ def run_pipeline(video_path: str, output_dir: str = "output"):
         logger.info("\n" + "=" * 80)
         logger.info("STAGE 4: CANDIDATE SEGMENT BUILDING")
         logger.info("=" * 80)
-        audit.log_pipeline_event("segmentation", "started", video_path)
         
-        try:
-            # Build sentence-based windows
-            sentence_candidates = build_sentence_windows(transcript_data)
-            logger.info(f"[OK] Sentence-based candidates: {len(sentence_candidates)}")
+        # Check if this stage is cached
+        if cache.has_completed_stage(pipeline_state, 'segmentation'):
+            all_candidates = cache.get_stage_result(pipeline_state, 'segmentation', 'candidates')
+            logger.info(f"✓ SKIPPED (using cached result): {len(all_candidates)} candidates")
+            cache_hit = True
+        else:
+            cache_hit = False
+        
+        if not cache_hit:
+            audit.log_pipeline_event("segmentation", "started", video_path)
             
-            # Build pause-based windows
-            pause_candidates = build_pause_windows(transcript_data)
-            logger.info(f"[OK] Pause-based candidates: {len(pause_candidates)}")
-            
-            # Combine candidates
-            all_candidates = sentence_candidates + pause_candidates
-            logger.info(f"[OK] Total candidates: {len(all_candidates)}")
-            
-            audit.log_pipeline_event("segmentation", "completed", video_path,
-                                    {"total_candidates": len(all_candidates)})
-        except Exception as e:
-            logger.error(f"[FAIL] Segmentation failed: {str(e)}")
-            audit.log_pipeline_event("segmentation", "failed", video_path,
-                                    error_message=str(e))
-            raise
+            try:
+                # Build sentence-based windows
+                sentence_candidates = build_sentence_windows(transcript_data)
+                logger.info(f"[OK] Sentence-based candidates: {len(sentence_candidates)}")
+                
+                # Build pause-based windows
+                pause_candidates = build_pause_windows(transcript_data)
+                logger.info(f"[OK] Pause-based candidates: {len(pause_candidates)}")
+                
+                # Combine candidates
+                all_candidates = sentence_candidates + pause_candidates
+                logger.info(f"[OK] Total candidates: {len(all_candidates)}")
+                
+                audit.log_pipeline_event("segmentation", "completed", video_path,
+                                        {"total_candidates": len(all_candidates)})
+                
+                # Save to cache
+                if use_cache:
+                    pipeline_state['segmentation'] = {
+                        'completed': True,
+                        'candidates': all_candidates,
+                        'sentence_count': len(sentence_candidates),
+                        'pause_count': len(pause_candidates)
+                    }
+                    cache.save_state(video_path, pipeline_state, 'segmentation')
+                    
+            except Exception as e:
+                logger.error(f"[FAIL] Segmentation failed: {str(e)}")
+                audit.log_pipeline_event("segmentation", "failed", video_path,
+                                        error_message=str(e))
+                raise
         
         if not all_candidates:
             logger.error("No candidate segments generated")
@@ -218,11 +313,11 @@ def run_pipeline(video_path: str, output_dir: str = "output"):
         logger.info("\n" + "=" * 80)
         logger.info("STAGE 5: AI HIGHLIGHT SCORING")
         logger.info("=" * 80)
-        audit.log_pipeline_event("ai_scoring", "started", video_path)
         
-        try:
-            scored_segments = score_segments(all_candidates, config['model'])
-            logger.info(f"[OK] Scored segments: {len(scored_segments)}")
+        # Check if this stage is cached
+        if cache.has_completed_stage(pipeline_state, 'ai_scoring'):
+            scored_segments = cache.get_stage_result(pipeline_state, 'ai_scoring', 'scored_segments')
+            logger.info(f"✓ SKIPPED (using cached result): {len(scored_segments)} scored segments")
             
             # Filter by minimum score threshold
             min_score = config['model'].get('min_score_threshold', 6.0)
@@ -230,17 +325,45 @@ def run_pipeline(video_path: str, output_dir: str = "output"):
                 seg for seg in scored_segments 
                 if seg.get('overall_score', 0) >= min_score
             ]
-            
             logger.info(f"[OK] High-quality segments (score >= {min_score}): {len(high_quality_segments)}")
+            cache_hit = True
+        else:
+            cache_hit = False
+        
+        if not cache_hit:
+            audit.log_pipeline_event("ai_scoring", "started", video_path)
             
-            audit.log_pipeline_event("ai_scoring", "completed", video_path,
-                                    {"scored": len(scored_segments),
-                                     "high_quality": len(high_quality_segments)})
-        except Exception as e:
-            logger.error(f"[FAIL] AI scoring failed: {str(e)}")
-            audit.log_pipeline_event("ai_scoring", "failed", video_path,
-                                    error_message=str(e))
-            raise
+            try:
+                scored_segments = score_segments(all_candidates, config['model'])
+                logger.info(f"[OK] Scored segments: {len(scored_segments)}")
+                
+                # Filter by minimum score threshold
+                min_score = config['model'].get('min_score_threshold', 6.0)
+                high_quality_segments = [
+                    seg for seg in scored_segments 
+                    if seg.get('overall_score', 0) >= min_score
+                ]
+                
+                logger.info(f"[OK] High-quality segments (score >= {min_score}): {len(high_quality_segments)}")
+                
+                audit.log_pipeline_event("ai_scoring", "completed", video_path,
+                                        {"scored": len(scored_segments),
+                                         "high_quality": len(high_quality_segments)})
+                
+                # Save to cache
+                if use_cache:
+                    pipeline_state['ai_scoring'] = {
+                        'completed': True,
+                        'scored_segments': scored_segments,
+                        'high_quality_count': len(high_quality_segments)
+                    }
+                    cache.save_state(video_path, pipeline_state, 'ai_scoring')
+                    
+            except Exception as e:
+                logger.error(f"[FAIL] AI scoring failed: {str(e)}")
+                audit.log_pipeline_event("ai_scoring", "failed", video_path,
+                                        error_message=str(e))
+                raise
         
         if not high_quality_segments:
             logger.warning("No high-quality segments found")
@@ -463,6 +586,11 @@ def main():
         action='store_true',
         help='Enable verbose logging'
     )
+    parser.add_argument(
+        '--no-cache',
+        action='store_true',
+        help='Disable caching and force full reprocessing'
+    )
     
     args = parser.parse_args()
     
@@ -470,7 +598,7 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     try:
-        run_pipeline(args.video_path, args.output)
+        run_pipeline(args.video_path, args.output, use_cache=not args.no_cache)
     except KeyboardInterrupt:
         logger.info("\nPipeline interrupted by user")
         sys.exit(1)

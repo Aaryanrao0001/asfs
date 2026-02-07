@@ -62,6 +62,9 @@ asfs/
 │   ├── __init__.py
 │   ├── scorer.py        # GitHub Models integration
 │   └── prompt.txt       # Scoring prompt template
+├── cache/               # Pipeline state caching (NEW)
+│   ├── __init__.py
+│   └── checkpoint.py    # Resume from last completed stage
 ├── validator/           # Clip validation
 │   ├── __init__.py
 │   ├── dedup.py         # Semantic deduplication
@@ -90,6 +93,7 @@ asfs/
 │   └── model.yaml       # AI model configuration
 ├── main.py              # Main orchestrator
 ├── requirements.txt     # Python dependencies
+├── CACHE_FEATURE.md     # Caching documentation
 └── README.md           # This file
 ```
 
@@ -174,7 +178,7 @@ export YOUTUBE_TOKEN_FILE="path/to/token.json"
 
 ### Usage
 
-**Basic usage:**
+**Basic usage (with caching enabled by default):**
 ```bash
 python main.py /path/to/video.mp4
 ```
@@ -188,6 +192,48 @@ python main.py /path/to/video.mp4 -o /path/to/output
 ```bash
 python main.py /path/to/video.mp4 -v
 ```
+
+**Disable caching (force full reprocessing):**
+```bash
+python main.py /path/to/video.mp4 --no-cache
+```
+
+### 🔄 Pipeline Caching & Resume Feature
+
+The pipeline **automatically caches** intermediate results and can **resume from the last completed stage** if interrupted or if processing the same video again.
+
+**Benefits:**
+- ⚡ **2-5 minute time savings** on re-runs
+- 🔁 Resume interrupted pipelines
+- 🧪 Perfect for testing configuration changes
+- 🚀 Faster development iteration
+
+**Cached Stages:**
+- Audio Extraction (~10s → <1s)
+- Transcription (~60-120s → <1s) 
+- Segmentation (~5s → <1s)
+- AI Scoring (~60-300s → <1s) ⭐ **Most valuable**
+
+**Example when resuming:**
+```
+✓ Found cached state from 2024-02-07T02:30:45
+✓ Last completed stage: ai_scoring
+
+STAGE 1: AUDIO EXTRACTION
+✓ SKIPPED (using cached result)
+...
+```
+
+**Cache Management:**
+```bash
+# View cache files
+ls -lh output/cache/
+
+# Clear caches
+rm -rf output/cache/
+```
+
+📖 See [CACHE_FEATURE.md](CACHE_FEATURE.md) for detailed documentation.
 
 ## 📊 Pipeline Stages
 
