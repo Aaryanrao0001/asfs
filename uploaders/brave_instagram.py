@@ -227,7 +227,7 @@ def upload_to_instagram_browser(
         page.keyboard.press("Control+A")
         page.keyboard.press("Backspace")
         for char in full_caption:
-            page.keyboard.type(char, delay=random.uniform(50, 150))
+            page.keyboard.type(char, delay=int(random.uniform(50, 150)))
         logger.info("Caption entered")
         
         browser.human_delay(2, 3)
@@ -428,7 +428,7 @@ def _upload_to_instagram_with_manager(
         page.keyboard.press("Control+A")
         page.keyboard.press("Backspace")
         for char in full_caption:
-            page.keyboard.type(char, delay=random.uniform(50, 150))
+            page.keyboard.type(char, delay=int(random.uniform(50, 150)))
         logger.info("Caption entered")
         
         page.wait_for_timeout(random.randint(2000, 3000))
