@@ -108,33 +108,60 @@ def _find_caption_input(page: Page):
     return None
 
 
-def _select_post_option(page: Page, timeout: int = 10000) -> bool:
+def _select_post_option(page: Page, timeout: int = 15000) -> bool:
     """
-    Click the "Post" option after opening Create menu.
+    Click the Post/Create option after opening Create menu.
     
-    Instagram shows Post/Reel/Story options after clicking Create (+).
-    File input only appears after selecting one of these options.
+    Instagram A/B tests multiple UI variants:
+    - "Post" (classic)
+    - "Create post" (newer)
+    - "Post to feed" (alternative)
+    - "Reel" (fallback - also opens file input)
+    
+    Try all variants with retries for React animation delays.
     
     Args:
         page: Playwright Page object
-        timeout: Timeout in milliseconds
+        timeout: Timeout in milliseconds (default: 15000)
         
     Returns:
         True if clicked successfully, False otherwise
     """
-    try:
-        button = page.locator('div[role="button"]:has-text("Post")')
-        button.wait_for(state="visible", timeout=timeout)
-        button.wait_for(state="enabled", timeout=timeout)
-        button.click()
-        logger.info("Post option selected from Create menu")
-        return True
-    except PlaywrightTimeoutError:
-        logger.error("Post option button not found in Create menu")
-        return False
-    except Exception as e:
-        logger.error(f"Error selecting Post option: {e}")
-        return False
+    # Priority order - most specific first
+    possible_selectors = [
+        'div[role="button"]:has-text("Post")',
+        'div[role="button"]:has-text("Create post")',
+        'div[role="button"]:has-text("Post to feed")',
+        'div[role="button"]:has-text("Reel")'  # Fallback - also allows file upload
+    ]
+    
+    max_retries = 2
+    
+    for attempt in range(max_retries):
+        logger.debug(f"Attempt {attempt + 1}/{max_retries} to find Post option")
+        
+        for selector in possible_selectors:
+            try:
+                button = page.locator(selector)
+                
+                # Try to interact with the first matching element
+                button.first.wait_for(state="visible", timeout=2000)
+                button.first.wait_for(state="enabled", timeout=2000)
+                logger.info(f"Found Post option: {selector}")
+                button.first.click()
+                logger.info("Post option clicked successfully")
+                return True
+            except Exception as e:
+                logger.debug(f"Selector {selector} failed: {e}")
+                continue
+        
+        # React animation may be slow - wait and retry
+        if attempt < max_retries - 1:
+            logger.debug("Menu may still be animating, waiting 3s before retry...")
+            page.wait_for_timeout(3000)
+    
+    logger.error("Post option button not found with any variant")
+    return False
 
 
 def upload_to_instagram_browser(
@@ -205,7 +232,8 @@ def upload_to_instagram_browser(
             create_button = page.wait_for_selector(INSTAGRAM_CREATE_SELECTOR, timeout=10000)
             create_button.click()
             logger.info("Create button clicked")
-            browser.human_delay(2, 3)
+            # Wait for menu to fully render (human-like delay)
+            page.wait_for_timeout(random.randint(1500, 3500))
         except PlaywrightTimeoutError:
             raise Exception("Instagram Create button not found - UI may have changed or user not logged in")
         
@@ -213,7 +241,8 @@ def upload_to_instagram_browser(
         logger.info("Selecting Post option from Create menu")
         if not _select_post_option(page):
             raise Exception("Post option not found - cannot proceed with upload")
-        browser.human_delay(1, 2)
+        # Wait for file dialog to mount (human-like delay)
+        page.wait_for_timeout(random.randint(2000, 4000))
         
         # Upload video file
         # The file input appears AFTER selecting Post option
@@ -226,7 +255,8 @@ def upload_to_instagram_browser(
             logger.error(f"Failed to upload file: {e}")
             raise
         
-        browser.human_delay(3, 5)
+        # Wait for upload + server processing (human-like delay)
+        page.wait_for_timeout(random.randint(3000, 6000))
         
         # Wait for upload processing
         logger.info("Waiting for video processing...")
@@ -239,7 +269,8 @@ def upload_to_instagram_browser(
         # First Next (crop step)
         if not _wait_for_button_enabled(page, "Next"):
             raise Exception("Upload processing failed - Next button never enabled")
-        browser.human_delay(1, 2)
+        # Wait for next modal (React state sync)
+        page.wait_for_timeout(random.randint(1500, 3000))
         
         # Second Next (filter step - may not always appear)
         try:
@@ -247,7 +278,8 @@ def upload_to_instagram_browser(
                 logger.info("Second Next button not needed (single-step flow)")
         except Exception:
             logger.info("Second Next button not needed (single-step flow)")
-        browser.human_delay(1, 2)
+        # Wait for next modal (React state sync)
+        page.wait_for_timeout(random.randint(1500, 3000))
         
         # Fill in caption (title + description + tags)
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
@@ -407,7 +439,8 @@ def _upload_to_instagram_with_manager(
             create_button = page.wait_for_selector(INSTAGRAM_CREATE_SELECTOR, timeout=10000)
             create_button.click()
             logger.info("Create button clicked")
-            page.wait_for_timeout(2000)
+            # Wait for menu to fully render (human-like delay)
+            page.wait_for_timeout(random.randint(1500, 3500))
         except PlaywrightTimeoutError:
             raise Exception("Instagram Create button not found - UI may have changed or user not logged in")
         
@@ -415,7 +448,8 @@ def _upload_to_instagram_with_manager(
         logger.info("Selecting Post option from Create menu")
         if not _select_post_option(page):
             raise Exception("Post option not found - cannot proceed with upload")
-        page.wait_for_timeout(random.randint(1000, 2000))
+        # Wait for file dialog to mount (human-like delay)
+        page.wait_for_timeout(random.randint(2000, 4000))
         
         # Upload video file
         # The file input appears AFTER selecting Post option
@@ -433,7 +467,8 @@ def _upload_to_instagram_with_manager(
             logger.error(f"Failed to upload file: {e}")
             raise
         
-        page.wait_for_timeout(random.randint(3000, 5000))
+        # Wait for upload + server processing (human-like delay)
+        page.wait_for_timeout(random.randint(3000, 6000))
         
         # Wait for upload processing
         logger.info("Waiting for video processing...")
@@ -446,7 +481,8 @@ def _upload_to_instagram_with_manager(
         # First Next (crop step)
         if not _wait_for_button_enabled(page, "Next"):
             raise Exception("Upload processing failed - Next button never enabled")
-        page.wait_for_timeout(random.randint(1000, 2000))
+        # Wait for next modal (React state sync)
+        page.wait_for_timeout(random.randint(1500, 3000))
         
         # Second Next (filter step - may not always appear)
         try:
@@ -454,7 +490,8 @@ def _upload_to_instagram_with_manager(
                 logger.info("Second Next button not needed (single-step flow)")
         except Exception:
             logger.info("Second Next button not needed (single-step flow)")
-        page.wait_for_timeout(random.randint(1000, 2000))
+        # Wait for next modal (React state sync)
+        page.wait_for_timeout(random.randint(1500, 3000))
         
         # Fill in caption (title + description + tags)
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()

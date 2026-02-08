@@ -232,9 +232,14 @@ class BraveBrowserBase:
         """
         logger.info(f"Launching Brave browser: {self.brave_path}")
         
-        # Kill any running Brave processes to avoid profile lock
-        if self.user_data_dir:
-            self._kill_brave_processes()
+        # DO NOT KILL EXISTING PROCESSES - This breaks session persistence
+        # Killing processes triggers:
+        # 1. Google security alert - suspicious activity detection
+        # 2. Instagram device change - forces re-login
+        # 3. Lost cookies - authentication state destroyed
+        # 4. TikTok captchas - rate limit triggers
+        # if self.user_data_dir:
+        #     self._kill_brave_processes()
         
         self.playwright = sync_playwright().start()
         

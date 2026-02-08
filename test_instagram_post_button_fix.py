@@ -33,35 +33,46 @@ class TestInstagramPostButtonFix(unittest.TestCase):
     
     def test_select_post_option_function_exists(self):
         """Verify _select_post_option() helper function exists."""
-        self.assertIn('def _select_post_option(page: Page, timeout: int = 10000) -> bool:',
+        self.assertIn('def _select_post_option(page: Page, timeout: int = 15000) -> bool:',
                      self.content,
                      "_select_post_option function not found")
         
         # Verify function docstring describes the purpose
-        self.assertIn('Instagram shows Post/Reel/Story options after clicking Create', 
+        self.assertIn('Instagram A/B tests multiple UI variants', 
                      self.content,
-                     "Function docstring doesn't describe Post/Reel/Story options")
-        self.assertIn('File input only appears after selecting one of these options',
+                     "Function docstring doesn't describe A/B testing variants")
+        self.assertIn('Try all variants with retries for React animation delays',
                      self.content,
-                     "Function docstring doesn't explain file input dependency")
+                     "Function docstring doesn't explain retry logic")
     
     def test_select_post_option_implementation(self):
         """Verify _select_post_option() has correct implementation."""
-        # Check for locator usage
-        self.assertIn('page.locator(\'div[role="button"]:has-text("Post")\')',
+        # Check for multiple selectors (multi-variant support)
+        self.assertIn('possible_selectors = [',
+                     self.content,
+                     "Missing possible_selectors list for multi-variant support")
+        
+        # Check for all variant selectors
+        self.assertIn('div[role="button"]:has-text("Post")',
                      self.content,
                      "Missing Post button locator")
+        self.assertIn('div[role="button"]:has-text("Create post")',
+                     self.content,
+                     "Missing Create post button locator")
+        self.assertIn('div[role="button"]:has-text("Reel")',
+                     self.content,
+                     "Missing Reel fallback locator")
         
         # Check for wait states
-        self.assertIn('button.wait_for(state="visible"', self.content,
+        self.assertIn('button.first.wait_for(state="visible"', self.content,
                      "Missing visibility wait in _select_post_option")
-        self.assertIn('button.wait_for(state="enabled"', self.content,
+        self.assertIn('button.first.wait_for(state="enabled"', self.content,
                      "Missing enabled wait in _select_post_option")
         
         # Check for click and logging
-        self.assertIn('Post option selected from Create menu', self.content,
+        self.assertIn('Post option clicked successfully', self.content,
                      "Missing success log message")
-        self.assertIn('Post option button not found in Create menu', self.content,
+        self.assertIn('Post option button not found with any variant', self.content,
                      "Missing error log for Post button not found")
     
     def test_ui_selector_wait_instead_of_networkidle(self):
@@ -186,7 +197,7 @@ class TestInstagramPostButtonFix(unittest.TestCase):
         expected_logs = [
             'Create button clicked',
             'Selecting Post option from Create menu',
-            'Post option selected from Create menu',
+            'Post option clicked successfully',
             'Waiting for file input to appear',
             'File upload initiated'
         ]
