@@ -108,6 +108,35 @@ def _find_caption_input(page: Page):
     return None
 
 
+def _select_post_option(page: Page, timeout: int = 10000) -> bool:
+    """
+    Click the "Post" option after opening Create menu.
+    
+    Instagram shows Post/Reel/Story options after clicking Create (+).
+    File input only appears after selecting one of these options.
+    
+    Args:
+        page: Playwright Page object
+        timeout: Timeout in milliseconds
+        
+    Returns:
+        True if clicked successfully, False otherwise
+    """
+    try:
+        button = page.locator('div[role="button"]:has-text("Post")')
+        button.wait_for(state="visible", timeout=timeout)
+        button.wait_for(state="enabled", timeout=timeout)
+        button.click()
+        logger.info("Post option selected from Create menu")
+        return True
+    except PlaywrightTimeoutError:
+        logger.error("Post option button not found in Create menu")
+        return False
+    except Exception as e:
+        logger.error(f"Error selecting Post option: {e}")
+        return False
+
+
 def upload_to_instagram_browser(
     video_path: str,
     title: str,
@@ -150,9 +179,9 @@ def upload_to_instagram_browser(
         logger.info("Navigating to Instagram")
         try:
             page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=60000)
-            # Wait for page to be interactive (not just DOM loaded)
-            page.wait_for_load_state("networkidle", timeout=30000)
-            logger.info("Page loaded and stabilized")
+            # Wait for UI to be ready instead of networkidle (more reliable with websockets)
+            page.wait_for_selector('svg[aria-label="New post"]', timeout=30000)
+            logger.info("Page loaded and UI ready")
             browser.human_delay(2, 4)
         except Exception as e:
             if "Timeout" in str(e):
@@ -180,8 +209,14 @@ def upload_to_instagram_browser(
         except PlaywrightTimeoutError:
             raise Exception("Instagram Create button not found - UI may have changed or user not logged in")
         
-        # Upload video file - NO decorative button click
-        # The file input exists immediately after clicking Create
+        # Select "Post" option from Create menu
+        logger.info("Selecting Post option from Create menu")
+        if not _select_post_option(page):
+            raise Exception("Post option not found - cannot proceed with upload")
+        browser.human_delay(1, 2)
+        
+        # Upload video file
+        # The file input appears AFTER selecting Post option
         logger.info("Waiting for file input to appear")
         try:
             file_input_selector = 'input[type="file"][accept*="video"], input[type="file"][accept*="image"]'
@@ -346,9 +381,9 @@ def _upload_to_instagram_with_manager(
         logger.info("Navigating to Instagram")
         try:
             page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=60000)
-            # Wait for page to be interactive (not just DOM loaded)
-            page.wait_for_load_state("networkidle", timeout=30000)
-            logger.info("Page loaded and stabilized")
+            # Wait for UI to be ready instead of networkidle (more reliable with websockets)
+            page.wait_for_selector('svg[aria-label="New post"]', timeout=30000)
+            logger.info("Page loaded and UI ready")
             page.wait_for_timeout(random.randint(2000, 4000))
         except Exception as e:
             if "Timeout" in str(e):
@@ -376,8 +411,14 @@ def _upload_to_instagram_with_manager(
         except PlaywrightTimeoutError:
             raise Exception("Instagram Create button not found - UI may have changed or user not logged in")
         
-        # Upload video file - NO decorative button click
-        # The file input exists immediately after clicking Create
+        # Select "Post" option from Create menu
+        logger.info("Selecting Post option from Create menu")
+        if not _select_post_option(page):
+            raise Exception("Post option not found - cannot proceed with upload")
+        page.wait_for_timeout(random.randint(1000, 2000))
+        
+        # Upload video file
+        # The file input appears AFTER selecting Post option
         logger.info("Waiting for file input to appear")
         try:
             file_input = page.wait_for_selector(
