@@ -2,27 +2,110 @@
 Instagram uploader using Brave browser automation.
 
 Navigates to Instagram and automates the Reels upload process.
+
+IMPORTANT LIMITATIONS (2025 Instagram Web Reality):
+- Instagram uses modal-based workflow (no URL changes)
+- No deterministic success confirmation available on web
+- React-heavy UI with dynamic components
+- Upload status is submitted but not verified
 """
 
 import os
 import random
 import logging
 from typing import Optional
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 from .brave_base import BraveBrowserBase
 
 logger = logging.getLogger(__name__)
 
-# Instagram Create button selectors (ordered by reliability)
-# Use stable semantic selectors - ARIA labels and roles, NOT hashed CSS classes
-# These selectors survive Instagram's frequent UI deployments
+# Instagram Create button selector - ONLY use the stable one
+# Instagram's UI is modal-based and this is the only consistently reliable trigger
+# If this selector fails, Instagram changed UI - log hard error and STOP
 INSTAGRAM_CREATE_SELECTORS = [
-    'svg[aria-label="New post"]',  # Most stable - exact ARIA label match
-    'svg[aria-label*="New"]',  # Fallback - partial ARIA label match
-    'a[href*="create"]',  # Link-based navigation
-    '[role="link"][href*="create"]',  # Role-based link
-    'div[role="button"]:has-text("Create")',  # Role + text (React div acting as button)
-    '[aria-label*="Create"]',  # Generic aria-label fallback
+    'svg[aria-label="New post"]',  # Single reliable selector
 ]
+INSTAGRAM_CREATE_SELECTOR = INSTAGRAM_CREATE_SELECTORS[0]
+
+
+def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 30000) -> bool:
+    """
+    Click button only when it's enabled and ready.
+    
+    Instagram disables buttons while processing uploads/crops.
+    Clicking early results in ignored clicks.
+    
+    Uses stable selectors:
+    - div[role="button"]:has-text("Next") for Next button
+    - div[role="button"]:has-text("Share") for Share button
+    
+    Args:
+        page: Playwright Page object
+        button_text: Text of the button (e.g., "Next", "Share")
+        timeout: Timeout in milliseconds
+        
+    Returns:
+        True if button clicked successfully, False otherwise
+    """
+    try:
+        # Use locator for better state checking
+        button = page.locator(f'div[role="button"]:has-text("{button_text}")')
+        
+        # Wait for visible
+        button.wait_for(state="visible", timeout=timeout)
+        logger.debug(f"{button_text} button visible")
+        
+        # Critical: Wait for enabled state (button not disabled while processing)
+        button.wait_for(state="enabled", timeout=timeout)
+        logger.debug(f"{button_text} button enabled")
+        
+        # Now safe to click
+        button.click()
+        logger.info(f"{button_text} button clicked")
+        return True
+    except PlaywrightTimeoutError:
+        logger.error(f"{button_text} button did not become enabled in time")
+        return False
+    except Exception as e:
+        logger.error(f"Error clicking {button_text} button: {e}")
+        return False
+
+
+def _find_caption_input(page: Page):
+    """
+    Find the caption input field using specific selectors.
+    
+    Instagram has multiple div[role="textbox"] elements.
+    We need to target the caption specifically to avoid typing into wrong fields.
+    
+    Args:
+        page: Playwright Page object
+        
+    Returns:
+        Caption input element or None if not found
+    """
+    # Primary selectors (most stable)
+    caption_selectors = [
+        'div[role="textbox"][aria-label*="caption"]',  # Most reliable
+        'textarea[aria-label*="caption"]',  # Fallback
+        'div[role="textbox"][aria-label*="Write a caption"]',  # English-specific
+    ]
+    
+    for selector in caption_selectors:
+        try:
+            caption_box = page.wait_for_selector(selector, timeout=5000)
+            if caption_box:
+                logger.info(f"Caption box found: {selector}")
+                return caption_box
+        except PlaywrightTimeoutError:
+            logger.debug(f"Caption selector {selector} not found, trying next")
+            continue
+        except Exception as e:
+            logger.debug(f"Error with caption selector {selector}: {e}")
+            continue
+    
+    logger.error("Caption input not found with any selector")
+    return None
 
 
 def upload_to_instagram_browser(
@@ -37,6 +120,11 @@ def upload_to_instagram_browser(
     """
     Upload video to Instagram Reels via Brave browser automation.
     
+    IMPORTANT LIMITATIONS:
+    - Instagram provides no deterministic confirmation on web uploads
+    - This function submits the upload but cannot verify its status
+    - Manual verification is recommended
+    
     Args:
         video_path: Path to video file
         title: Video title (used in caption)
@@ -47,7 +135,7 @@ def upload_to_instagram_browser(
         profile_directory: Profile directory name (e.g., "Default", "Profile 1")
         
     Returns:
-        Success message if upload completed, None if failed
+        Success message if upload submitted, None if failed
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video file not found: {video_path}")
@@ -62,6 +150,9 @@ def upload_to_instagram_browser(
         logger.info("Navigating to Instagram")
         try:
             page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=60000)
+            # Wait for page to be interactive (not just DOM loaded)
+            page.wait_for_load_state("networkidle", timeout=30000)
+            logger.info("Page loaded and stabilized")
             browser.human_delay(2, 4)
         except Exception as e:
             if "Timeout" in str(e):
@@ -79,44 +170,26 @@ def upload_to_instagram_browser(
             page.wait_for_timeout(60000)
             logger.info("Continuing with upload")
         
-        # Click "Create" button (+ icon) - with multiple fallback selectors
+        # Click "Create" button - use ONLY the reliable selector
         logger.info("Clicking Create button")
-        create_clicked = False
-        
-        # Try multiple selectors due to Instagram's frequent A/B testing
-        for selector in INSTAGRAM_CREATE_SELECTORS:
-            try:
-                logger.debug(f"Trying Create selector: {selector}")
-                page.wait_for_selector(selector, timeout=3000)
-                element = page.query_selector(selector)
-                if element:
-                    element.click()
-                    browser.human_delay(2, 3)
-                    create_clicked = True
-                    logger.info(f"Create button clicked using selector: {selector}")
-                    break
-            except Exception as e:
-                logger.debug(f"Selector {selector} failed: {e}")
-                continue
-        
-        if not create_clicked:
-            raise Exception("Failed to find and click Create button with any selector")
-        
-        # Upload video file
-        logger.info("Uploading video file")
         try:
-            # File input is usually hidden, trigger it via button click then file selection
-            file_input_selector = 'input[type="file"]'
+            create_button = page.wait_for_selector(INSTAGRAM_CREATE_SELECTOR, timeout=10000)
+            create_button.click()
+            logger.info("Create button clicked")
+            browser.human_delay(2, 3)
+        except PlaywrightTimeoutError:
+            raise Exception("Instagram Create button not found - UI may have changed or user not logged in")
+        
+        # Upload video file - NO decorative button click
+        # The file input exists immediately after clicking Create
+        logger.info("Waiting for file input to appear")
+        try:
+            file_input_selector = 'input[type="file"][accept*="video"], input[type="file"][accept*="image"]'
             browser.upload_file(file_input_selector, video_path)
+            logger.info("File upload initiated")
         except Exception as e:
             logger.error(f"Failed to upload file: {e}")
-            # Instagram may require clicking "Select from computer" first
-            try:
-                page.click('button:has-text("Select from computer")')
-                browser.human_delay(1, 2)
-                browser.upload_file('input[type="file"]', video_path)
-            except:
-                raise
+            raise
         
         browser.human_delay(3, 5)
         
@@ -124,58 +197,52 @@ def upload_to_instagram_browser(
         logger.info("Waiting for video processing...")
         page.wait_for_timeout(5000)
         
-        # Click "Next" through the editing steps
+        # Click "Next" through the editing steps with proper state checking
         logger.info("Navigating through editing steps")
-        for i in range(3):  # Usually 2-3 "Next" clicks needed
-            try:
-                # Use role-based selector - more stable than class names
-                # Instagram uses div[role="button"] for Next button
-                next_button = page.wait_for_selector('div[role="button"]:has-text("Next"), button:has-text("Next")', timeout=5000)
-                if next_button:
-                    next_button.click()
-                    # Wait for state transition - Instagram is React-heavy
-                    browser.human_delay(2, 3)
-            except:
-                break  # No more Next buttons
+        # Instagram is React-heavy - wait for state transitions
+        
+        # First Next (crop step)
+        if not _wait_for_button_enabled(page, "Next"):
+            raise Exception("Upload processing failed - Next button never enabled")
+        browser.human_delay(1, 2)
+        
+        # Second Next (filter step - may not always appear)
+        try:
+            if not _wait_for_button_enabled(page, "Next", timeout=10000):
+                logger.info("Second Next button not needed (single-step flow)")
+        except Exception:
+            logger.info("Second Next button not needed (single-step flow)")
+        browser.human_delay(1, 2)
         
         # Fill in caption (title + description + tags)
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
         
         logger.info("Filling caption")
-        try:
-            # Use stable role-based selector - Instagram uses div[role="textbox"]
-            # Prefer role + aria attributes over class names
-            caption_selector = 'div[role="textbox"][aria-label*="caption"], textarea[aria-label*="caption"], div[role="textbox"], textarea[placeholder*="caption"]'
-            browser.human_type(caption_selector, full_caption)
-        except Exception as e:
-            logger.warning(f"Caption input failed: {e}")
+        caption_box = _find_caption_input(page)
+        if not caption_box:
+            raise Exception("Caption input not found - cannot safely enter caption. UI may have changed.")
+        
+        # Type caption with human-like delays for better bot detection avoidance
+        caption_box.click()
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+        for char in full_caption:
+            page.keyboard.type(char, delay=random.randint(50, 150))
+        logger.info("Caption entered")
         
         browser.human_delay(2, 3)
         
-        # Click "Share" button
+        # Click "Share" button with state checking
         logger.info("Clicking Share button")
-        try:
-            # Use role-based selector - Instagram uses div[role="button"] for Share
-            share_button_selector = 'div[role="button"]:has-text("Share"), button:has-text("Share")'
-            page.wait_for_selector(share_button_selector, timeout=5000)
-            browser.click_and_wait(share_button_selector, delay=3)
-        except Exception as e:
-            logger.error(f"Failed to click Share: {e}")
+        if not _wait_for_button_enabled(page, "Share", timeout=10000):
+            raise Exception("Share button failed - cannot complete upload")
         
-        # Wait for upload confirmation
-        logger.info("Waiting for upload confirmation...")
-        page.wait_for_timeout(5000)
+        # Wait a moment for submission
+        page.wait_for_timeout(3000)
         
-        # Check for success indicators
-        # Instagram shows "Your reel has been shared" or similar
-        content = page.content().lower()
-        
-        if "shared" in content or "posted" in content:
-            logger.info("Instagram upload completed successfully")
-            result = "Instagram upload successful"
-        else:
-            logger.warning("Upload status unclear - manual verification recommended")
-            result = "Instagram upload submitted (verify manually)"
+        # Be HONEST about what we know
+        logger.warning("Instagram upload submitted - no deterministic confirmation available")
+        result = "Instagram upload submitted (status unverified)"
         
         browser.human_delay(2, 3)
         browser.close()
@@ -257,6 +324,11 @@ def _upload_to_instagram_with_manager(
     
     This function is called when pipeline has initialized the manager.
     It gets a page from the shared context instead of creating a new browser.
+    
+    IMPORTANT LIMITATIONS:
+    - Instagram provides no deterministic confirmation on web uploads
+    - This function submits the upload but cannot verify its status
+    - Manual verification is recommended
     """
     from .brave_manager import BraveBrowserManager
     
@@ -274,6 +346,9 @@ def _upload_to_instagram_with_manager(
         logger.info("Navigating to Instagram")
         try:
             page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=60000)
+            # Wait for page to be interactive (not just DOM loaded)
+            page.wait_for_load_state("networkidle", timeout=30000)
+            logger.info("Page loaded and stabilized")
             page.wait_for_timeout(random.randint(2000, 4000))
         except Exception as e:
             if "Timeout" in str(e):
@@ -291,44 +366,31 @@ def _upload_to_instagram_with_manager(
             page.wait_for_timeout(60000)
             logger.info("Continuing with upload")
         
-        # Click "Create" button (+ icon) - with multiple fallback selectors
+        # Click "Create" button - use ONLY the reliable selector
         logger.info("Clicking Create button")
-        create_clicked = False
-        
-        # Try multiple selectors due to Instagram's frequent A/B testing
-        for selector in INSTAGRAM_CREATE_SELECTORS:
-            try:
-                logger.debug(f"Trying Create selector: {selector}")
-                page.wait_for_selector(selector, timeout=3000)
-                element = page.query_selector(selector)
-                if element:
-                    element.click()
-                    page.wait_for_timeout(2000)
-                    create_clicked = True
-                    logger.info(f"Create button clicked using selector: {selector}")
-                    break
-            except Exception as e:
-                logger.debug(f"Selector {selector} failed: {e}")
-                continue
-        
-        if not create_clicked:
-            raise Exception("Failed to find and click Create button with any selector")
-        
-        # Upload video file
-        logger.info("Uploading video file")
         try:
-            file_input_selector = 'input[type="file"]'
-            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=10000)
+            create_button = page.wait_for_selector(INSTAGRAM_CREATE_SELECTOR, timeout=10000)
+            create_button.click()
+            logger.info("Create button clicked")
+            page.wait_for_timeout(2000)
+        except PlaywrightTimeoutError:
+            raise Exception("Instagram Create button not found - UI may have changed or user not logged in")
+        
+        # Upload video file - NO decorative button click
+        # The file input exists immediately after clicking Create
+        logger.info("Waiting for file input to appear")
+        try:
+            file_input = page.wait_for_selector(
+                'input[type="file"][accept*="video"], input[type="file"][accept*="image"]',
+                state="attached",
+                timeout=15000
+            )
+            logger.info("File input found, uploading file")
             file_input.set_input_files(video_path)
+            logger.info("File upload initiated")
         except Exception as e:
             logger.error(f"Failed to upload file: {e}")
-            try:
-                page.click('button:has-text("Select from computer")')
-                page.wait_for_timeout(random.randint(1000, 2000))
-                file_input = page.wait_for_selector('input[type="file"]', state="attached", timeout=10000)
-                file_input.set_input_files(video_path)
-            except:
-                raise
+            raise
         
         page.wait_for_timeout(random.randint(3000, 5000))
         
@@ -336,64 +398,52 @@ def _upload_to_instagram_with_manager(
         logger.info("Waiting for video processing...")
         page.wait_for_timeout(5000)
         
-        # Click "Next" through the editing steps
+        # Click "Next" through the editing steps with proper state checking
         logger.info("Navigating through editing steps")
-        for i in range(3):
-            try:
-                # Use role-based selector - more stable than class names
-                # Instagram uses div[role="button"] for Next button
-                next_button = page.wait_for_selector('div[role="button"]:has-text("Next"), button:has-text("Next")', timeout=5000)
-                if next_button:
-                    next_button.click()
-                    # Wait for state transition - Instagram is React-heavy
-                    page.wait_for_timeout(random.randint(2000, 3000))
-            except:
-                break
+        # Instagram is React-heavy - wait for state transitions
+        
+        # First Next (crop step)
+        if not _wait_for_button_enabled(page, "Next"):
+            raise Exception("Upload processing failed - Next button never enabled")
+        page.wait_for_timeout(random.randint(1000, 2000))
+        
+        # Second Next (filter step - may not always appear)
+        try:
+            if not _wait_for_button_enabled(page, "Next", timeout=10000):
+                logger.info("Second Next button not needed (single-step flow)")
+        except Exception:
+            logger.info("Second Next button not needed (single-step flow)")
+        page.wait_for_timeout(random.randint(1000, 2000))
         
         # Fill in caption (title + description + tags)
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
         
         logger.info("Filling caption")
-        try:
-            # Use stable role-based selector - Instagram uses div[role="textbox"]
-            # Prefer role + aria attributes over class names
-            caption_selector = 'div[role="textbox"][aria-label*="caption"], textarea[aria-label*="caption"], div[role="textbox"], textarea[placeholder*="caption"]'
-            element = page.wait_for_selector(caption_selector, timeout=10000)
-            element.click()
-            page.keyboard.press("Control+A")
-            page.keyboard.press("Backspace")
-            for char in full_caption:
-                element.type(char, delay=random.uniform(50, 150))
-        except Exception as e:
-            logger.warning(f"Caption input failed: {e}")
+        caption_box = _find_caption_input(page)
+        if not caption_box:
+            raise Exception("Caption input not found - cannot safely enter caption. UI may have changed.")
+        
+        # Type caption with human-like delays
+        caption_box.click()
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+        for char in full_caption:
+            page.keyboard.type(char, delay=random.randint(50, 150))
+        logger.info("Caption entered")
         
         page.wait_for_timeout(random.randint(2000, 3000))
         
-        # Click "Share" button
+        # Click "Share" button with state checking
         logger.info("Clicking Share button")
-        try:
-            # Use role-based selector - Instagram uses div[role="button"] for Share
-            share_button_selector = 'div[role="button"]:has-text("Share"), button:has-text("Share")'
-            page.wait_for_selector(share_button_selector, timeout=5000)
-            share_button = page.query_selector(share_button_selector)
-            share_button.click()
-            page.wait_for_timeout(3000)
-        except Exception as e:
-            logger.error(f"Failed to click Share: {e}")
+        if not _wait_for_button_enabled(page, "Share", timeout=10000):
+            raise Exception("Share button failed - cannot complete upload")
         
-        # Wait for upload confirmation
-        logger.info("Waiting for upload confirmation...")
-        page.wait_for_timeout(5000)
+        # Wait a moment for submission
+        page.wait_for_timeout(3000)
         
-        # Check for success indicators
-        content = page.content().lower()
-        
-        if "shared" in content or "posted" in content:
-            logger.info("Instagram upload completed successfully")
-            result = "Instagram upload successful"
-        else:
-            logger.warning("Upload status unclear - manual verification recommended")
-            result = "Instagram upload submitted (verify manually)"
+        # Be HONEST about what we know
+        logger.warning("Instagram upload submitted - no deterministic confirmation available")
+        result = "Instagram upload submitted (status unverified)"
         
         # Navigate to about:blank for next uploader
         manager.navigate_to_blank(page)
