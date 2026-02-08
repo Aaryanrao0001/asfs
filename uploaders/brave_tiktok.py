@@ -107,8 +107,18 @@ def upload_to_tiktok_browser(
         # Wait for video processing to complete - look for actual UI signals
         try:
             # Wait for caption input to become available (indicates upload processed)
-            page.wait_for_selector('div[contenteditable="true"]', timeout=120000, state="visible")
-            logger.info("Upload processing complete - caption input available")
+            # Try specific selectors first, fall back to generic if needed
+            caption_input_ready = False
+            for selector in ['[data-e2e="caption-input"]', 'div[contenteditable="true"]']:
+                try:
+                    page.wait_for_selector(selector, timeout=120000, state="visible")
+                    logger.info(f"Upload processing complete - caption input available ({selector})")
+                    caption_input_ready = True
+                    break
+                except:
+                    continue
+            if not caption_input_ready:
+                raise Exception("Caption input not found after upload")
         except Exception as e:
             logger.warning(f"Could not confirm upload processing completed: {e}")
             # Fallback to delay if selector not found
@@ -340,8 +350,18 @@ def _upload_to_tiktok_with_manager(
         # Wait for video processing to complete - look for actual UI signals
         try:
             # Wait for caption input to become available (indicates upload processed)
-            page.wait_for_selector('div[contenteditable="true"]', timeout=120000, state="visible")
-            logger.info("Upload processing complete - caption input available")
+            # Try specific selectors first, fall back to generic if needed
+            caption_input_ready = False
+            for selector in ['[data-e2e="caption-input"]', 'div[contenteditable="true"]']:
+                try:
+                    page.wait_for_selector(selector, timeout=120000, state="visible")
+                    logger.info(f"Upload processing complete - caption input available ({selector})")
+                    caption_input_ready = True
+                    break
+                except:
+                    continue
+            if not caption_input_ready:
+                raise Exception("Caption input not found after upload")
         except Exception as e:
             logger.warning(f"Could not confirm upload processing completed: {e}")
             # Fallback to delay if selector not found
