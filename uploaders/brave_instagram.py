@@ -144,14 +144,13 @@ def _select_post_option(page: Page, timeout: int = 15000) -> bool:
             try:
                 button = page.locator(selector)
                 
-                # Check if button exists
-                if button.count() > 0:
-                    logger.info(f"Found Post option: {selector}")
-                    button.first.wait_for(state="visible", timeout=3000)
-                    button.first.wait_for(state="enabled", timeout=3000)
-                    button.first.click()
-                    logger.info("Post option clicked successfully")
-                    return True
+                # Try to interact with the first matching element
+                button.first.wait_for(state="visible", timeout=2000)
+                button.first.wait_for(state="enabled", timeout=2000)
+                logger.info(f"Found Post option: {selector}")
+                button.first.click()
+                logger.info("Post option clicked successfully")
+                return True
             except Exception as e:
                 logger.debug(f"Selector {selector} failed: {e}")
                 continue
