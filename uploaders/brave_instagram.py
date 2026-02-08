@@ -97,7 +97,7 @@ def _find_caption_input(page: Page) -> Optional[object]:
             if caption_box:
                 logger.info(f"Caption box found: {selector}")
                 return caption_box
-        except:
+        except Exception:
             continue
     
     logger.error("Caption input not found with any selector")
@@ -207,7 +207,7 @@ def upload_to_instagram_browser(
         try:
             if not _wait_for_button_enabled(page, "Next", timeout=10000):
                 logger.info("Second Next button not needed (single-step flow)")
-        except:
+        except Exception:
             logger.info("Second Next button not needed (single-step flow)")
         browser.human_delay(1, 2)
         
@@ -404,7 +404,7 @@ def _upload_to_instagram_with_manager(
         try:
             if not _wait_for_button_enabled(page, "Next", timeout=10000):
                 logger.info("Second Next button not needed (single-step flow)")
-        except:
+        except Exception:
             logger.info("Second Next button not needed (single-step flow)")
         page.wait_for_timeout(random.randint(1000, 2000))
         
