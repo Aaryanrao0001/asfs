@@ -9,8 +9,12 @@ import random
 import logging
 from typing import Optional
 from .brave_base import BraveBrowserBase
+from .selectors import get_tiktok_selectors, try_selectors_with_page
 
 logger = logging.getLogger(__name__)
+
+# Initialize TikTok selector manager (with intelligence)
+_tiktok_selectors = get_tiktok_selectors()
 
 # TikTok network error messages
 TIKTOK_NETWORK_ERROR_MESSAGES = [
@@ -86,114 +90,184 @@ def upload_to_tiktok_browser(
                 else:
                     raise Exception("Upload interface not found after login - TikTok UI may have changed")
         
-        # Upload video file
-        # TikTok uses an iframe for upload - selectors may vary
-        # Common selectors (update as needed based on current TikTok UI):
-        # - input[type="file"]
-        # - [data-e2e="upload-input"]
+        # Upload video file using selector intelligence with adaptive ranking
+        # Automatically tries multiple selector strategies based on success history
         logger.info("Uploading video file")
-        try:
-            # Try primary selector
-            file_input_selector = 'input[type="file"]'
-            browser.upload_file(file_input_selector, video_path)
-        except Exception as e:
-            logger.warning(f"Primary file selector failed, trying alternative: {e}")
-            # Try alternative selector
-            file_input_selector = '[data-e2e="upload-input"]'
-            browser.upload_file(file_input_selector, video_path)
+        
+        file_input_group = _tiktok_selectors.get_group("file_input")
+        if not file_input_group:
+            # Fallback to legacy behavior
+            try:
+                file_input_selector = 'input[type="file"]'
+                browser.upload_file(file_input_selector, video_path)
+            except Exception as e:
+                logger.warning(f"Primary file selector failed, trying alternative: {e}")
+                file_input_selector = '[data-e2e="upload-input"]'
+                browser.upload_file(file_input_selector, video_path)
+        else:
+            # Use selector intelligence
+            selector_value, file_input = try_selectors_with_page(
+                page,
+                file_input_group,
+                timeout=30000,
+                state="attached"
+            )
+            
+            if not file_input:
+                logger.error("Failed to find file input with selector intelligence")
+                raise Exception("File input not found")
+            
+            browser.upload_file(selector_value, video_path)
         
         logger.info("File upload initiated, waiting for processing signals...")
         
-        # Wait for video processing to complete - look for actual UI signals
+        # CRITICAL: Wait for load state after file upload to detect navigation/modals
         try:
-            # Wait for caption input to become available (indicates upload processed)
-            # Try specific selectors first, fall back to generic if needed
-            caption_input_ready = False
-            for selector in ['[data-e2e="caption-input"]', 'div[contenteditable="true"]']:
-                try:
-                    page.wait_for_selector(selector, timeout=360000, state="visible")
-                    logger.info(f"Upload processing complete - caption input available ({selector})")
-                    caption_input_ready = True
-                    break
-                except:
-                    continue
-            if not caption_input_ready:
-                raise Exception("Caption input not found after upload")
-        except Exception as e:
-            logger.warning(f"Could not confirm upload processing completed: {e}")
-            # Fallback to delay if selector not found
-            page.wait_for_timeout(15000)
+            page.wait_for_load_state("networkidle", timeout=20000)
+            logger.debug("Network idle after file upload")
+        except Exception:
+            logger.debug("Network idle timeout after upload, using fallback delay")
+            page.wait_for_timeout(5000)
+        
+        # Wait for video processing to complete - look for actual UI signals
+        # Use selector intelligence to detect caption input (indicates upload processed)
+        logger.info("Waiting for upload processing to complete...")
+        
+        caption_group = _tiktok_selectors.get_group("caption_input")
+        if caption_group:
+            # Try with extended timeout for upload processing
+            selector_value, caption_element = try_selectors_with_page(
+                page,
+                caption_group,
+                timeout=360000,  # 6 minutes for large video processing
+                state="visible"
+            )
+            
+            if caption_element:
+                logger.info(f"Upload processing complete - caption input available")
+            else:
+                logger.warning("Could not confirm upload processing with caption selector")
+                page.wait_for_timeout(15000)
+        else:
+            # Legacy fallback
+            try:
+                caption_input_ready = False
+                for selector in ['[data-e2e="caption-input"]', 'div[contenteditable="true"]']:
+                    try:
+                        page.wait_for_selector(selector, timeout=360000, state="visible")
+                        logger.info(f"Upload processing complete - caption input available ({selector})")
+                        caption_input_ready = True
+                        break
+                    except:
+                        continue
+                if not caption_input_ready:
+                    raise Exception("Caption input not found after upload")
+            except Exception as e:
+                logger.warning(f"Could not confirm upload processing completed: {e}")
+                page.wait_for_timeout(15000)
         
         # Fill in caption (title + description + tags)
-        # TikTok combines everything into a single caption field
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
         
-        logger.info("Filling caption")
-        # Use prioritized list of specific selectors - never spray text into random editable divs
-        caption_selectors = [
-            '[data-e2e="caption-input"]',
-            '[data-testid="video-caption"] div[contenteditable="true"]',
-            'div.caption-editor[contenteditable="true"]',
-            'div[contenteditable="true"][aria-label*="caption" i]',
-            'div[contenteditable="true"][placeholder*="caption" i]'
-        ]
+        logger.info("Filling caption with selector intelligence")
+        caption_group = _tiktok_selectors.get_group("caption_input")
         
-        caption_found = False
-        for selector in caption_selectors:
-            try:
-                # Verify element exists and is the right one
-                element = page.query_selector(selector)
-                if element:
-                    logger.info(f"Caption box found with selector: {selector}")
-                    browser.human_type(selector, full_caption)
-                    caption_found = True
-                    break
-            except Exception as e:
-                logger.debug(f"Selector {selector} failed: {e}")
-                continue
-        
-        if not caption_found:
-            logger.warning("Could not find caption input with specific selectors - upload may fail")
-            # Last resort - but warn about it
-            try:
-                caption_selector = 'div[contenteditable="true"]'
-                logger.warning(f"Using generic selector as fallback: {caption_selector}")
-                browser.human_type(caption_selector, full_caption)
-            except:
-                logger.error("All caption selectors failed - caption not entered")
+        if not caption_group:
+            # Legacy fallback
+            caption_selectors = [
+                '[data-e2e="caption-input"]',
+                '[data-testid="video-caption"] div[contenteditable="true"]',
+                'div.caption-editor[contenteditable="true"]',
+                'div[contenteditable="true"][aria-label*="caption" i]',
+                'div[contenteditable="true"][placeholder*="caption" i]'
+            ]
+            
+            caption_found = False
+            for selector in caption_selectors:
+                try:
+                    element = page.query_selector(selector)
+                    if element:
+                        logger.info(f"Caption box found with selector: {selector}")
+                        browser.human_type(selector, full_caption)
+                        caption_found = True
+                        break
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    continue
+            
+            if not caption_found:
+                logger.warning("Could not find caption input with specific selectors - upload may fail")
+                try:
+                    caption_selector = 'div[contenteditable="true"]'
+                    logger.warning(f"Using generic selector as fallback: {caption_selector}")
+                    browser.human_type(caption_selector, full_caption)
+                except:
+                    logger.error("All caption selectors failed - caption not entered")
+        else:
+            # Use selector intelligence
+            selector_value, element = try_selectors_with_page(
+                page,
+                caption_group,
+                timeout=30000,
+                state="visible"
+            )
+            
+            if element:
+                logger.info(f"Caption input found with: {selector_value[:60]}")
+                browser.human_type(selector_value, full_caption)
+            else:
+                logger.error("Caption input not found with any selector")
+                raise Exception("Caption input not found")
         
         browser.human_delay(2, 3)
         
         # Optional: Set privacy to Public (usually default)
         # Selector may be: [data-e2e="privacy-select"]
         
-        # Click Post/Upload button
+        # Click Post/Upload button using selector intelligence
+        # Stable selectors: data-e2e + role-based + text fallbacks (prioritized)
         logger.info("Clicking Post button")
         try:
-            # Stable selectors: data-e2e + role-based + text fallbacks
-            # TikTok uses div[role="button"] or button elements
-            # Use specific selectors that won't match Discard button
-            # Priority: data-e2e (most reliable) > role-based > element type
-            post_selectors = [
-                '[data-e2e="post-button"]',  # TikTok's official test attribute
-                'div[role="button"]:has-text("Post")',
-                'button:has-text("Post")'
-            ]
-            # Filter to exclude any button containing "Discard"
-            post_button_selector = ', '.join([f'{s}:not(:has-text("Discard"))' for s in post_selectors])
+            post_button_group = _tiktok_selectors.get_group("post_button")
+            if not post_button_group:
+                # Legacy fallback
+                post_selectors = [
+                    '[data-e2e="post-button"]',
+                    'div[role="button"]:has-text("Post")',
+                    'button:has-text("Post")'
+                ]
+                post_button_selector = ', '.join([f'{s}:not(:has-text("Discard"))' for s in post_selectors])
+                
+                post_button = page.wait_for_selector(post_button_selector, timeout=30000, state="visible")
+                
+                logger.info("Submitting post (preventing premature navigation)...")
+                post_button.click(no_wait_after=True)
+                logger.info("Post button clicked successfully")
+            else:
+                # Use selector intelligence
+                selector_value, post_button = try_selectors_with_page(
+                    page,
+                    post_button_group,
+                    timeout=30000,
+                    state="visible"
+                )
+                
+                if not post_button:
+                    logger.error("Post button not found with any selector")
+                    raise Exception("TikTok Post button not found")
+                
+                # CRITICAL: Use no_wait_after=True to prevent browser context closure
+                logger.info("Submitting post (preventing premature navigation)...")
+                post_button.click(no_wait_after=True)
+                logger.info("Post button clicked successfully")
             
-            # Wait for button to be available
-            post_button = page.wait_for_selector(post_button_selector, timeout=30000, state="visible")
-            
-            # CRITICAL FIX: Use no_wait_after=True to prevent browser context closure
-            # The Post button may trigger navigation/redirect which can close the context
-            # Using no_wait_after allows us to maintain control and capture the result
-            logger.info("Submitting post (preventing premature navigation)...")
-            post_button.click(no_wait_after=True)
-            logger.info("Post button clicked successfully")
-            
-            # Wait for submission to process
-            page.wait_for_timeout(9000)
+            # CRITICAL: Wait for load state after post to detect success/navigation
+            try:
+                page.wait_for_load_state("networkidle", timeout=15000)
+                logger.debug("Network idle after post submission")
+            except Exception:
+                logger.debug("Network idle timeout after post, continuing...")
+                page.wait_for_timeout(9000)
         except Exception as e:
             logger.error(f"Failed to click Post button: {e}")
             # Re-raise with context to preserve exception chain
@@ -354,115 +428,195 @@ def _upload_to_tiktok_with_manager(
                 else:
                     raise Exception("Upload interface not found after login - TikTok UI may have changed")
         
-        # Upload video file
+        # Upload video file using selector intelligence with adaptive ranking
+        # Automatically tries multiple selector strategies based on success history
         logger.info("Uploading video file")
-        try:
-            file_input_selector = 'input[type="file"]'
-            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=30000)
-            file_input.set_input_files(video_path)
-        except Exception as e:
-            logger.warning(f"Primary file selector failed, trying alternative: {e}")
-            file_input_selector = '[data-e2e="upload-input"]'
-            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=30000)
+        
+        file_input_group = _tiktok_selectors.get_group("file_input")
+        if not file_input_group:
+            # Legacy fallback
+            try:
+                file_input_selector = 'input[type="file"]'
+                file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=30000)
+                file_input.set_input_files(video_path)
+            except Exception as e:
+                logger.warning(f"Primary file selector failed, trying alternative: {e}")
+                file_input_selector = '[data-e2e="upload-input"]'
+                file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=30000)
+                file_input.set_input_files(video_path)
+        else:
+            # Use selector intelligence
+            selector_value, file_input = try_selectors_with_page(
+                page,
+                file_input_group,
+                timeout=30000,
+                state="attached"
+            )
+            
+            if not file_input:
+                logger.error("Failed to find file input with selector intelligence")
+                raise Exception("File input not found")
+            
             file_input.set_input_files(video_path)
         
         logger.info("File upload initiated, waiting for processing signals...")
         
-        # Wait for video processing to complete - look for actual UI signals
+        # CRITICAL: Wait for load state after file upload
         try:
-            # Wait for caption input to become available (indicates upload processed)
-            # Try specific selectors first, fall back to generic if needed
-            caption_input_ready = False
-            for selector in ['[data-e2e="caption-input"]', 'div[contenteditable="true"]']:
-                try:
-                    page.wait_for_selector(selector, timeout=360000, state="visible")
-                    logger.info(f"Upload processing complete - caption input available ({selector})")
-                    caption_input_ready = True
-                    break
-                except:
-                    continue
-            if not caption_input_ready:
-                raise Exception("Caption input not found after upload")
-        except Exception as e:
-            logger.warning(f"Could not confirm upload processing completed: {e}")
-            # Fallback to delay if selector not found
-            page.wait_for_timeout(15000)
+            page.wait_for_load_state("networkidle", timeout=20000)
+            logger.debug("Network idle after file upload")
+        except Exception:
+            logger.debug("Network idle timeout after upload, using fallback delay")
+            page.wait_for_timeout(5000)
+        
+        # Wait for video processing to complete using selector intelligence
+        logger.info("Waiting for upload processing to complete...")
+        
+        caption_group = _tiktok_selectors.get_group("caption_input")
+        if caption_group:
+            # Try with extended timeout for upload processing
+            selector_value, caption_element = try_selectors_with_page(
+                page,
+                caption_group,
+                timeout=360000,  # 6 minutes for large video processing
+                state="visible"
+            )
+            
+            if caption_element:
+                logger.info(f"Upload processing complete - caption input available")
+            else:
+                logger.warning("Could not confirm upload processing with caption selector")
+                page.wait_for_timeout(15000)
+        else:
+            # Legacy fallback
+            try:
+                caption_input_ready = False
+                for selector in ['[data-e2e="caption-input"]', 'div[contenteditable="true"]']:
+                    try:
+                        page.wait_for_selector(selector, timeout=360000, state="visible")
+                        logger.info(f"Upload processing complete - caption input available ({selector})")
+                        caption_input_ready = True
+                        break
+                    except:
+                        continue
+                if not caption_input_ready:
+                    raise Exception("Caption input not found after upload")
+            except Exception as e:
+                logger.warning(f"Could not confirm upload processing completed: {e}")
+                page.wait_for_timeout(15000)
         
         # Fill in caption (title + description + tags)
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
         
-        logger.info("Filling caption")
-        # Use prioritized list of specific selectors - never spray text into random editable divs
-        caption_selectors = [
-            '[data-e2e="caption-input"]',
-            '[data-testid="video-caption"] div[contenteditable="true"]',
-            'div.caption-editor[contenteditable="true"]',
-            'div[contenteditable="true"][aria-label*="caption" i]',
-            'div[contenteditable="true"][placeholder*="caption" i]'
-        ]
+        logger.info("Filling caption with selector intelligence")
+        caption_group = _tiktok_selectors.get_group("caption_input")
         
-        caption_found = False
-        for selector in caption_selectors:
-            try:
-                # Verify element exists and is the right one
-                element = page.query_selector(selector)
-                if element:
-                    logger.info(f"Caption box found with selector: {selector}")
+        if not caption_group:
+            # Legacy fallback
+            caption_selectors = [
+                '[data-e2e="caption-input"]',
+                '[data-testid="video-caption"] div[contenteditable="true"]',
+                'div.caption-editor[contenteditable="true"]',
+                'div[contenteditable="true"][aria-label*="caption" i]',
+                'div[contenteditable="true"][placeholder*="caption" i]'
+            ]
+            
+            caption_found = False
+            for selector in caption_selectors:
+                try:
+                    element = page.query_selector(selector)
+                    if element:
+                        logger.info(f"Caption box found with selector: {selector}")
+                        element.click()
+                        page.keyboard.press("Control+A")
+                        page.keyboard.press("Backspace")
+                        for char in full_caption:
+                            element.type(char, delay=random.uniform(50, 150))
+                        caption_found = True
+                        break
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    continue
+            
+            if not caption_found:
+                logger.warning("Could not find caption input with specific selectors - upload may fail")
+                try:
+                    caption_selector = 'div[contenteditable="true"]'
+                    logger.warning(f"Using generic selector as fallback: {caption_selector}")
+                    element = page.wait_for_selector(caption_selector, timeout=30000)
                     element.click()
                     page.keyboard.press("Control+A")
                     page.keyboard.press("Backspace")
                     for char in full_caption:
                         element.type(char, delay=random.uniform(50, 150))
-                    caption_found = True
-                    break
-            except Exception as e:
-                logger.debug(f"Selector {selector} failed: {e}")
-                continue
-        
-        if not caption_found:
-            logger.warning("Could not find caption input with specific selectors - upload may fail")
-            # Last resort - but warn about it
-            try:
-                caption_selector = 'div[contenteditable="true"]'
-                logger.warning(f"Using generic selector as fallback: {caption_selector}")
-                element = page.wait_for_selector(caption_selector, timeout=30000)
+                except:
+                    logger.error("All caption selectors failed - caption not entered")
+        else:
+            # Use selector intelligence
+            selector_value, element = try_selectors_with_page(
+                page,
+                caption_group,
+                timeout=30000,
+                state="visible"
+            )
+            
+            if element:
+                logger.info(f"Caption input found with: {selector_value[:60]}")
                 element.click()
                 page.keyboard.press("Control+A")
                 page.keyboard.press("Backspace")
                 for char in full_caption:
                     element.type(char, delay=random.uniform(50, 150))
-            except:
-                logger.error("All caption selectors failed - caption not entered")
+            else:
+                logger.error("Caption input not found with any selector")
+                raise Exception("Caption input not found")
         
         page.wait_for_timeout(random.randint(6000, 9000))
         
-        # Click Post/Upload button
+        # Click Post/Upload button using selector intelligence
+        # Stable selectors: data-e2e + role-based + text fallbacks (prioritized)
         logger.info("Clicking Post button")
         try:
-            # Stable selectors: data-e2e + role-based + text fallbacks
-            # TikTok uses div[role="button"] or button elements
-            # Use specific selectors that won't match Discard button
-            # Priority: data-e2e (most reliable) > role-based > element type
-            post_selectors = [
-                '[data-e2e="post-button"]',  # TikTok's official test attribute
-                'div[role="button"]:has-text("Post")',
-                'button:has-text("Post")'
-            ]
-            # Filter to exclude any button containing "Discard"
-            post_button_selector = ', '.join([f'{s}:not(:has-text("Discard"))' for s in post_selectors])
+            post_button_group = _tiktok_selectors.get_group("post_button")
+            if not post_button_group:
+                # Legacy fallback
+                post_selectors = [
+                    '[data-e2e="post-button"]',
+                    'div[role="button"]:has-text("Post")',
+                    'button:has-text("Post")'
+                ]
+                post_button_selector = ', '.join([f'{s}:not(:has-text("Discard"))' for s in post_selectors])
+                
+                post_button = page.wait_for_selector(post_button_selector, timeout=30000, state="visible")
+                
+                logger.info("Submitting post (preventing premature navigation)...")
+                post_button.click(no_wait_after=True)
+                logger.info("Post button clicked successfully")
+            else:
+                # Use selector intelligence
+                selector_value, post_button = try_selectors_with_page(
+                    page,
+                    post_button_group,
+                    timeout=30000,
+                    state="visible"
+                )
+                
+                if not post_button:
+                    logger.error("Post button not found with any selector")
+                    raise Exception("TikTok Post button not found")
+                
+                # CRITICAL: Use no_wait_after=True to prevent browser context closure
+                logger.info("Submitting post (preventing premature navigation)...")
+                post_button.click(no_wait_after=True)
+                logger.info("Post button clicked successfully")
             
-            # Wait for button to be available
-            post_button = page.wait_for_selector(post_button_selector, timeout=30000, state="visible")
-            
-            # CRITICAL FIX: Use no_wait_after=True to prevent browser context closure
-            # The Post button may trigger navigation/redirect which can close the context
-            # Using no_wait_after allows us to maintain control and capture the result
-            logger.info("Submitting post (preventing premature navigation)...")
-            post_button.click(no_wait_after=True)
-            logger.info("Post button clicked successfully")
-            
-            # Wait for submission to process
-            page.wait_for_timeout(9000)
+            # CRITICAL: Wait for load state after post to detect success/navigation
+            try:
+                page.wait_for_load_state("networkidle", timeout=15000)
+                logger.debug("Network idle after post submission")
+            except Exception:
+                logger.debug("Network idle timeout after post, continuing...")
+                page.wait_for_timeout(9000)
         except Exception as e:
             logger.error(f"Failed to click Post button: {e}")
             # Re-raise with context to preserve exception chain

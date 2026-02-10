@@ -9,8 +9,12 @@ import random
 import logging
 from typing import Optional
 from .brave_base import BraveBrowserBase
+from .selectors import get_youtube_selectors, try_selectors_with_page
 
 logger = logging.getLogger(__name__)
+
+# Initialize YouTube selector manager (with intelligence)
+_youtube_selectors = get_youtube_selectors()
 
 
 def upload_to_youtube_browser(
@@ -122,11 +126,28 @@ def upload_to_youtube_browser(
         
         browser.human_delay(1, 2)
         
-        # Fill in description
+        # Fill in description using selector intelligence with multiple fallback strategies
         logger.info("Filling description")
         try:
-            description_selector = 'div[aria-label*="description" i][contenteditable="true"], ytcp-social-suggestions-textbox[label*="Description" i] textarea'
-            element = page.wait_for_selector(description_selector, timeout=5000)
+            description_group = _youtube_selectors.get_group("description_input")
+            
+            if not description_group:
+                # Legacy fallback
+                description_selector = 'div[aria-label*="description" i][contenteditable="true"], ytcp-social-suggestions-textbox[label*="Description" i] textarea'
+                element = page.wait_for_selector(description_selector, timeout=5000)
+            else:
+                # Use selector intelligence with multiple fallbacks
+                selector_value, element = try_selectors_with_page(
+                    page,
+                    description_group,
+                    timeout=10000,
+                    state="visible"
+                )
+                
+                if not element:
+                    logger.warning("Description field not found with any selector")
+                    raise Exception("Description field not found")
+            
             element.click()
             page.keyboard.press("Control+A")
             page.keyboard.press("Backspace")
@@ -134,6 +155,7 @@ def upload_to_youtube_browser(
             # Combine description and tags
             full_description = f"{description}\n\n{tags}".strip()
             element.type(full_description, delay=50)
+            logger.info("Description filled successfully")
         except Exception as e:
             logger.warning(f"Failed to fill description: {e}")
         
@@ -350,13 +372,29 @@ def _upload_to_youtube_with_manager(
         logger.info("Waiting for upload processing...")
         page.wait_for_timeout(5000)
         
-        # Fill in title
+        # Fill in title using selector intelligence
         logger.info("Filling title")
         try:
-            title_selector = 'div[aria-label*="title" i][contenteditable="true"], ytcp-social-suggestions-textbox[label*="Title" i] input'
-            page.wait_for_selector(title_selector, timeout=10000)
+            title_group = _youtube_selectors.get_group("title_input")
             
-            element = page.query_selector(title_selector)
+            if not title_group:
+                # Legacy fallback
+                title_selector = 'div[aria-label*="title" i][contenteditable="true"], ytcp-social-suggestions-textbox[label*="Title" i] input'
+                page.wait_for_selector(title_selector, timeout=10000)
+                element = page.query_selector(title_selector)
+            else:
+                # Use selector intelligence
+                selector_value, element = try_selectors_with_page(
+                    page,
+                    title_group,
+                    timeout=10000,
+                    state="visible"
+                )
+                
+                if not element:
+                    logger.warning("Title field not found with any selector")
+                    raise Exception("Title field not found")
+            
             element.click()
             page.keyboard.press("Control+A")
             page.keyboard.press("Backspace")
@@ -366,11 +404,28 @@ def _upload_to_youtube_with_manager(
         
         page.wait_for_timeout(random.randint(1000, 2000))
         
-        # Fill in description
+        # Fill in description using selector intelligence with multiple fallback strategies
         logger.info("Filling description")
         try:
-            description_selector = 'div[aria-label*="description" i][contenteditable="true"], ytcp-social-suggestions-textbox[label*="Description" i] textarea'
-            element = page.wait_for_selector(description_selector, timeout=5000)
+            description_group = _youtube_selectors.get_group("description_input")
+            
+            if not description_group:
+                # Legacy fallback
+                description_selector = 'div[aria-label*="description" i][contenteditable="true"], ytcp-social-suggestions-textbox[label*="Description" i] textarea'
+                element = page.wait_for_selector(description_selector, timeout=5000)
+            else:
+                # Use selector intelligence with multiple fallbacks
+                selector_value, element = try_selectors_with_page(
+                    page,
+                    description_group,
+                    timeout=10000,
+                    state="visible"
+                )
+                
+                if not element:
+                    logger.warning("Description field not found with any selector")
+                    raise Exception("Description field not found")
+            
             element.click()
             page.keyboard.press("Control+A")
             page.keyboard.press("Backspace")

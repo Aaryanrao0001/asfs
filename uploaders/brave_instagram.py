@@ -16,8 +16,12 @@ import logging
 from typing import Optional
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 from .brave_base import BraveBrowserBase
+from .selectors import get_instagram_selectors, try_selectors_with_page
 
 logger = logging.getLogger(__name__)
+
+# Initialize Instagram selector manager (with intelligence)
+_instagram_selectors = get_instagram_selectors()
 
 # Instagram Create button selector - ONLY use the stable one
 # Instagram's UI is modal-based and this is the only consistently reliable trigger
@@ -73,10 +77,11 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
 
 def _find_caption_input(page: Page):
     """
-    Find the caption input field using specific selectors.
+    Find the caption input field using selector intelligence.
     
     Instagram has multiple div[role="textbox"] elements.
     We need to target the caption specifically to avoid typing into wrong fields.
+    Uses selectors with ARIA labels: [aria-label*="caption"]
     
     Args:
         page: Playwright Page object
@@ -84,25 +89,21 @@ def _find_caption_input(page: Page):
     Returns:
         Caption input element or None if not found
     """
-    # Primary selectors (most stable)
-    caption_selectors = [
-        'div[role="textbox"][aria-label*="caption"]',  # Most reliable
-        'textarea[aria-label*="caption"]',  # Fallback
-        'div[role="textbox"][aria-label*="Write a caption"]',  # English-specific
-    ]
+    caption_group = _instagram_selectors.get_group("caption_input")
+    if not caption_group:
+        logger.error("Caption selector group not found in selector manager")
+        return None
     
-    for selector in caption_selectors:
-        try:
-            caption_box = page.wait_for_selector(selector, timeout=15000)
-            if caption_box:
-                logger.info(f"Caption box found: {selector}")
-                return caption_box
-        except PlaywrightTimeoutError:
-            logger.debug(f"Caption selector {selector} not found, trying next")
-            continue
-        except Exception as e:
-            logger.debug(f"Error with caption selector {selector}: {e}")
-            continue
+    selector_value, element = try_selectors_with_page(
+        page, 
+        caption_group, 
+        timeout=15000,
+        state="visible"
+    )
+    
+    if element:
+        logger.info(f"Caption box found with selector: {selector_value[:60]}")
+        return element
     
     logger.error("Caption input not found with any selector")
     return None
@@ -112,13 +113,8 @@ def _select_post_option(page: Page, timeout: int = 45000) -> bool:
     """
     Click the Post/Create option after opening Create menu.
     
-    Instagram A/B tests multiple UI variants:
-    - "Post" (classic)
-    - "Create post" (newer)
-    - "Post to feed" (alternative)
-    - "Reel" (fallback - also opens file upload)
-    
-    Try all variants with retries for React animation delays.
+    Instagram A/B tests multiple UI variants and now defaults to Reel.
+    Uses selector intelligence to try all known variants with adaptive ranking.
     
     Args:
         page: Playwright Page object
@@ -127,35 +123,35 @@ def _select_post_option(page: Page, timeout: int = 45000) -> bool:
     Returns:
         True if clicked successfully, False otherwise
     """
-    # Priority order - most specific first
-    possible_selectors = [
-        'div[role="button"]:has-text("Post")',
-        'div[role="button"]:has-text("Create post")',
-        'div[role="button"]:has-text("Post to feed")',
-        'div[role="button"]:has-text("Reel")'  # Fallback - also allows file upload
-    ]
+    post_option_group = _instagram_selectors.get_group("post_option")
+    if not post_option_group:
+        logger.error("Post option selector group not found in selector manager")
+        return False
     
     max_retries = 5  # Increased retries for slow networks
-    attempted_selectors = []
     
     for attempt in range(max_retries):
         logger.debug(f"Attempt {attempt + 1}/{max_retries} to find Post option")
         
-        for selector in possible_selectors:
+        # Try all selectors ranked by intelligence system
+        for selector in post_option_group.get_ranked_selectors():
             try:
-                button = page.locator(selector)
+                button = page.locator(selector.value)
                 
                 # Increased timeout by 3x for slow networks (3s → 9s)
                 # Try to interact with the first matching element
                 button.first.wait_for(state="visible", timeout=9000)
                 button.first.wait_for(state="enabled", timeout=9000)
-                logger.info(f"Found Post option: {selector}")
+                logger.info(f"Found Post option: {selector.value}")
                 button.first.click()
                 logger.info("Post option clicked successfully")
+                
+                # Record success for adaptive learning
+                post_option_group.record_success(selector.value)
                 return True
             except Exception as e:
-                attempted_selectors.append(selector)
-                logger.debug(f"Selector {selector} failed: {e}")
+                logger.debug(f"Selector {selector.value} failed: {e}")
+                post_option_group.record_failure(selector.value)
                 continue
         
         # React animation may be slow - wait longer and retry (3s → 9s)
@@ -163,7 +159,7 @@ def _select_post_option(page: Page, timeout: int = 45000) -> bool:
             logger.debug("Menu may still be animating, waiting 9s before retry...")
             page.wait_for_timeout(9000)
     
-    logger.error(f"Post option button not found with any variant. Attempted selectors: {attempted_selectors}")
+    logger.error(f"Post option button not found with any variant after {max_retries} retries")
     return False
 
 
@@ -247,14 +243,42 @@ def upload_to_instagram_browser(
         logger.info("Selecting Post option from Create menu")
         if not _select_post_option(page):
             raise Exception("Post option not found - cannot proceed with upload")
-        # Wait for file dialog to mount - increased by 3x (2-4s → 6-12s)
-        page.wait_for_timeout(random.randint(6000, 12000))
+        
+        # CRITICAL: Wait for load state after menu selection to prevent premature navigation
+        # This prevents closing browser context/pages due to navigation or popups
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+            logger.debug("Network idle after Post option selection")
+        except Exception:
+            # Fallback to timeout if networkidle hangs
+            logger.debug("Network idle timeout, using fallback delay")
+            page.wait_for_timeout(random.randint(6000, 12000))
         
         # Upload video file
         # The file input appears AFTER selecting Post option
         logger.info("Waiting for file input to appear")
-        try:
+        
+        file_input_group = _instagram_selectors.get_group("file_input")
+        if not file_input_group:
+            # Fallback to legacy behavior
             file_input_selector = 'input[type="file"][accept*="video"], input[type="file"][accept*="image"]'
+            logger.warning("Using legacy file input selector")
+        else:
+            # Use selector intelligence
+            selector_value, file_input = try_selectors_with_page(
+                page,
+                file_input_group,
+                timeout=15000,
+                state="attached"  # File inputs are often hidden
+            )
+            
+            if not file_input:
+                logger.error("Failed to find file input with selector intelligence")
+                raise Exception("File input not found")
+            
+            file_input_selector = selector_value
+        
+        try:
             browser.upload_file(file_input_selector, video_path)
             logger.info("File upload initiated")
         except Exception as e:
@@ -455,18 +479,41 @@ def _upload_to_instagram_with_manager(
         logger.info("Selecting Post option from Create menu")
         if not _select_post_option(page):
             raise Exception("Post option not found - cannot proceed with upload")
-        # Wait for file dialog to mount (human-like delay)
-        page.wait_for_timeout(random.randint(6000, 12000))
         
-        # Upload video file
-        # The file input appears AFTER selecting Post option
-        logger.info("Waiting for file input to appear")
+        # CRITICAL: Wait for load state after menu selection
         try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+            logger.debug("Network idle after Post option selection")
+        except Exception:
+            logger.debug("Network idle timeout, using fallback delay")
+            page.wait_for_timeout(random.randint(6000, 12000))
+        
+        # Upload video file using selector intelligence
+        logger.info("Waiting for file input to appear")
+        
+        file_input_group = _instagram_selectors.get_group("file_input")
+        if not file_input_group:
+            # Fallback to legacy
             file_input = page.wait_for_selector(
                 'input[type="file"][accept*="video"], input[type="file"][accept*="image"]',
                 state="attached",
                 timeout=15000
             )
+            logger.warning("Using legacy file input selector")
+        else:
+            # Use selector intelligence
+            selector_value, file_input = try_selectors_with_page(
+                page,
+                file_input_group,
+                timeout=15000,
+                state="attached"
+            )
+            
+            if not file_input:
+                logger.error("Failed to find file input")
+                raise Exception("File input not found")
+        
+        try:
             logger.info("File input found, uploading file")
             file_input.set_input_files(video_path)
             logger.info("File upload initiated")
