@@ -28,7 +28,7 @@ INSTAGRAM_CREATE_SELECTORS = [
 INSTAGRAM_CREATE_SELECTOR = INSTAGRAM_CREATE_SELECTORS[0]
 
 
-def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 30000) -> bool:
+def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000) -> bool:
     """
     Click button only when it's enabled and ready.
     
@@ -42,7 +42,7 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 30000)
     Args:
         page: Playwright Page object
         button_text: Text of the button (e.g., "Next", "Share")
-        timeout: Timeout in milliseconds
+        timeout: Timeout in milliseconds (default: 90000, 3x increased)
         
     Returns:
         True if button clicked successfully, False otherwise
@@ -93,7 +93,7 @@ def _find_caption_input(page: Page):
     
     for selector in caption_selectors:
         try:
-            caption_box = page.wait_for_selector(selector, timeout=5000)
+            caption_box = page.wait_for_selector(selector, timeout=15000)
             if caption_box:
                 logger.info(f"Caption box found: {selector}")
                 return caption_box
@@ -108,7 +108,7 @@ def _find_caption_input(page: Page):
     return None
 
 
-def _select_post_option(page: Page, timeout: int = 15000) -> bool:
+def _select_post_option(page: Page, timeout: int = 45000) -> bool:
     """
     Click the Post/Create option after opening Create menu.
     
@@ -122,7 +122,7 @@ def _select_post_option(page: Page, timeout: int = 15000) -> bool:
     
     Args:
         page: Playwright Page object
-        timeout: Timeout in milliseconds (default: 15000)
+        timeout: Timeout in milliseconds (default: 45000, 3x increased)
         
     Returns:
         True if clicked successfully, False otherwise
@@ -135,7 +135,7 @@ def _select_post_option(page: Page, timeout: int = 15000) -> bool:
         'div[role="button"]:has-text("Reel")'  # Fallback - also allows file upload
     ]
     
-    max_retries = 3  # Increased retries for better reliability
+    max_retries = 5  # Increased retries for slow networks
     attempted_selectors = []
     
     for attempt in range(max_retries):
@@ -145,10 +145,10 @@ def _select_post_option(page: Page, timeout: int = 15000) -> bool:
             try:
                 button = page.locator(selector)
                 
-                # Increased timeout for better reliability with slow animations
+                # Increased timeout by 3x for slow networks (3s → 9s)
                 # Try to interact with the first matching element
-                button.first.wait_for(state="visible", timeout=3000)
-                button.first.wait_for(state="enabled", timeout=3000)
+                button.first.wait_for(state="visible", timeout=9000)
+                button.first.wait_for(state="enabled", timeout=9000)
                 logger.info(f"Found Post option: {selector}")
                 button.first.click()
                 logger.info("Post option clicked successfully")
@@ -158,10 +158,10 @@ def _select_post_option(page: Page, timeout: int = 15000) -> bool:
                 logger.debug(f"Selector {selector} failed: {e}")
                 continue
         
-        # React animation may be slow - wait and retry
+        # React animation may be slow - wait longer and retry (3s → 9s)
         if attempt < max_retries - 1:
-            logger.debug("Menu may still be animating, waiting 3s before retry...")
-            page.wait_for_timeout(3000)
+            logger.debug("Menu may still be animating, waiting 9s before retry...")
+            page.wait_for_timeout(9000)
     
     logger.error(f"Post option button not found with any variant. Attempted selectors: {attempted_selectors}")
     return False
@@ -208,11 +208,13 @@ def upload_to_instagram_browser(
         # Navigate to Instagram
         logger.info("Navigating to Instagram")
         try:
-            page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=60000)
+            # Increased timeout by 3x (60s → 180s) for slow networks
+            page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=180000)
             # Wait for UI to be ready instead of networkidle (more reliable with websockets)
-            page.wait_for_selector('svg[aria-label="New post"]', timeout=30000)
+            # Increased timeout by 3x (30s → 90s)
+            page.wait_for_selector('svg[aria-label="New post"]', timeout=90000)
             logger.info("Page loaded and UI ready")
-            browser.human_delay(2, 4)
+            browser.human_delay(3, 6)  # Increased by 3x (2-4s → 6-12s for actual implementation)
         except Exception as e:
             if "Timeout" in str(e):
                 logger.error("Instagram navigation timed out. Possible causes:")
@@ -232,12 +234,12 @@ def upload_to_instagram_browser(
         # Click "Create" button - use ONLY the reliable selector
         logger.info("Clicking Create button")
         try:
-            create_button = page.wait_for_selector(INSTAGRAM_CREATE_SELECTOR, timeout=10000)
+            create_button = page.wait_for_selector(INSTAGRAM_CREATE_SELECTOR, timeout=30000)
             create_button.click()
             logger.info("Create button clicked")
             # Wait for menu to fully render - increased for better reliability
             # Instagram's React-based menu needs time to animate and mount
-            page.wait_for_timeout(random.randint(2500, 4500))
+            page.wait_for_timeout(random.randint(7500, 13500))
         except PlaywrightTimeoutError:
             raise Exception("Instagram Create button not found - UI may have changed or user not logged in")
         
@@ -245,8 +247,8 @@ def upload_to_instagram_browser(
         logger.info("Selecting Post option from Create menu")
         if not _select_post_option(page):
             raise Exception("Post option not found - cannot proceed with upload")
-        # Wait for file dialog to mount (human-like delay)
-        page.wait_for_timeout(random.randint(2000, 4000))
+        # Wait for file dialog to mount - increased by 3x (2-4s → 6-12s)
+        page.wait_for_timeout(random.randint(6000, 12000))
         
         # Upload video file
         # The file input appears AFTER selecting Post option
@@ -259,12 +261,12 @@ def upload_to_instagram_browser(
             logger.error(f"Failed to upload file: {e}")
             raise
         
-        # Wait for upload + server processing (human-like delay)
-        page.wait_for_timeout(random.randint(3000, 6000))
+        # Wait for upload + server processing - increased by 3x (3-6s → 9-18s)
+        page.wait_for_timeout(random.randint(9000, 18000))
         
-        # Wait for upload processing
+        # Wait for upload processing - increased by 3x (5s → 15s)
         logger.info("Waiting for video processing...")
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(15000)
         
         # Click "Next" through the editing steps with proper state checking
         logger.info("Navigating through editing steps")
@@ -278,7 +280,7 @@ def upload_to_instagram_browser(
         
         # Second Next (filter step - may not always appear)
         try:
-            if not _wait_for_button_enabled(page, "Next", timeout=10000):
+            if not _wait_for_button_enabled(page, "Next", timeout=30000):
                 logger.info("Second Next button not needed (single-step flow)")
         except Exception:
             logger.info("Second Next button not needed (single-step flow)")
@@ -305,7 +307,7 @@ def upload_to_instagram_browser(
         
         # Click "Share" button with state checking
         logger.info("Clicking Share button")
-        if not _wait_for_button_enabled(page, "Share", timeout=10000):
+        if not _wait_for_button_enabled(page, "Share", timeout=30000):
             raise Exception("Share button failed - cannot complete upload")
         
         # Wait a moment for submission
@@ -416,11 +418,11 @@ def _upload_to_instagram_with_manager(
         # Navigate to Instagram
         logger.info("Navigating to Instagram")
         try:
-            page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=60000)
+            page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=180000)
             # Wait for UI to be ready instead of networkidle (more reliable with websockets)
-            page.wait_for_selector('svg[aria-label="New post"]', timeout=30000)
+            page.wait_for_selector('svg[aria-label="New post"]', timeout=90000)
             logger.info("Page loaded and UI ready")
-            page.wait_for_timeout(random.randint(2000, 4000))
+            page.wait_for_timeout(random.randint(6000, 12000))
         except Exception as e:
             if "Timeout" in str(e):
                 logger.error("Instagram navigation timed out. Possible causes:")
@@ -440,12 +442,12 @@ def _upload_to_instagram_with_manager(
         # Click "Create" button - use ONLY the reliable selector
         logger.info("Clicking Create button")
         try:
-            create_button = page.wait_for_selector(INSTAGRAM_CREATE_SELECTOR, timeout=10000)
+            create_button = page.wait_for_selector(INSTAGRAM_CREATE_SELECTOR, timeout=30000)
             create_button.click()
             logger.info("Create button clicked")
             # Wait for menu to fully render - increased for better reliability
             # Instagram's React-based menu needs time to animate and mount
-            page.wait_for_timeout(random.randint(2500, 4500))
+            page.wait_for_timeout(random.randint(7500, 13500))
         except PlaywrightTimeoutError:
             raise Exception("Instagram Create button not found - UI may have changed or user not logged in")
         
@@ -454,7 +456,7 @@ def _upload_to_instagram_with_manager(
         if not _select_post_option(page):
             raise Exception("Post option not found - cannot proceed with upload")
         # Wait for file dialog to mount (human-like delay)
-        page.wait_for_timeout(random.randint(2000, 4000))
+        page.wait_for_timeout(random.randint(6000, 12000))
         
         # Upload video file
         # The file input appears AFTER selecting Post option
@@ -491,7 +493,7 @@ def _upload_to_instagram_with_manager(
         
         # Second Next (filter step - may not always appear)
         try:
-            if not _wait_for_button_enabled(page, "Next", timeout=10000):
+            if not _wait_for_button_enabled(page, "Next", timeout=30000):
                 logger.info("Second Next button not needed (single-step flow)")
         except Exception:
             logger.info("Second Next button not needed (single-step flow)")
@@ -514,11 +516,11 @@ def _upload_to_instagram_with_manager(
             page.keyboard.type(char, delay=random.randint(50, 150))
         logger.info("Caption entered")
         
-        page.wait_for_timeout(random.randint(2000, 3000))
+        page.wait_for_timeout(random.randint(6000, 9000))
         
         # Click "Share" button with state checking
         logger.info("Clicking Share button")
-        if not _wait_for_button_enabled(page, "Share", timeout=10000):
+        if not _wait_for_button_enabled(page, "Share", timeout=30000):
             raise Exception("Share button failed - cannot complete upload")
         
         # Wait a moment for submission

@@ -58,7 +58,7 @@ def upload_to_tiktok_browser(
         # Navigate to TikTok upload page with network error handling
         logger.info("Navigating to TikTok upload page")
         try:
-            page.goto("https://www.tiktok.com/upload", wait_until="domcontentloaded", timeout=60000)
+            page.goto("https://www.tiktok.com/upload", wait_until="domcontentloaded", timeout=180000)
         except Exception as nav_error:
             error_msg = str(nav_error).lower()
             if "net::" in error_msg or "timeout" in error_msg:
@@ -77,7 +77,7 @@ def upload_to_tiktok_browser(
             logger.info("Waiting 90 seconds for manual login...")
             # Wait for upload interface to become available (functional check, not URL-based)
             try:
-                page.wait_for_selector('input[type="file"]', timeout=90000, state="attached")
+                page.wait_for_selector('input[type="file"]', timeout=270000, state="attached")
                 logger.info("Login successful - upload interface detected")
             except Exception:
                 # Check if still on login page
@@ -111,7 +111,7 @@ def upload_to_tiktok_browser(
             caption_input_ready = False
             for selector in ['[data-e2e="caption-input"]', 'div[contenteditable="true"]']:
                 try:
-                    page.wait_for_selector(selector, timeout=120000, state="visible")
+                    page.wait_for_selector(selector, timeout=360000, state="visible")
                     logger.info(f"Upload processing complete - caption input available ({selector})")
                     caption_input_ready = True
                     break
@@ -122,7 +122,7 @@ def upload_to_tiktok_browser(
         except Exception as e:
             logger.warning(f"Could not confirm upload processing completed: {e}")
             # Fallback to delay if selector not found
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(15000)
         
         # Fill in caption (title + description + tags)
         # TikTok combines everything into a single caption field
@@ -172,10 +172,18 @@ def upload_to_tiktok_browser(
         try:
             # Stable selectors: data-e2e + role-based + text fallbacks
             # TikTok uses div[role="button"] or button elements
-            post_button_selector = '[data-e2e="post-button"], div[role="button"]:has-text("Post"), button:has-text("Post")'
+            # Use specific selectors that won't match Discard button
+            # Priority: data-e2e (most reliable) > role-based > element type
+            post_selectors = [
+                '[data-e2e="post-button"]',  # TikTok's official test attribute
+                'div[role="button"]:has-text("Post")',
+                'button:has-text("Post")'
+            ]
+            # Filter to exclude any button containing "Discard"
+            post_button_selector = ', '.join([f'{s}:not(:has-text("Discard"))' for s in post_selectors])
             
             # Wait for button to be available
-            post_button = page.wait_for_selector(post_button_selector, timeout=10000, state="visible")
+            post_button = page.wait_for_selector(post_button_selector, timeout=30000, state="visible")
             
             # CRITICAL FIX: Use no_wait_after=True to prevent browser context closure
             # The Post button may trigger navigation/redirect which can close the context
@@ -185,7 +193,7 @@ def upload_to_tiktok_browser(
             logger.info("Post button clicked successfully")
             
             # Wait for submission to process
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(9000)
         except Exception as e:
             logger.error(f"Failed to click Post button: {e}")
             # Re-raise with context to preserve exception chain
@@ -193,7 +201,7 @@ def upload_to_tiktok_browser(
         
         # Wait for upload confirmation
         logger.info("Waiting for upload confirmation...")
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(15000)
         
         # Check for success indicators - be honest about what we can detect
         current_url = page.url
@@ -319,7 +327,7 @@ def _upload_to_tiktok_with_manager(
         # Navigate to TikTok upload page with network error handling
         logger.info("Navigating to TikTok upload page")
         try:
-            page.goto("https://www.tiktok.com/upload", wait_until="domcontentloaded", timeout=60000)
+            page.goto("https://www.tiktok.com/upload", wait_until="domcontentloaded", timeout=180000)
         except Exception as nav_error:
             error_msg = str(nav_error).lower()
             if "net::" in error_msg or "timeout" in error_msg:
@@ -337,7 +345,7 @@ def _upload_to_tiktok_with_manager(
             logger.info("Waiting 90 seconds for manual login...")
             # Wait for upload interface to become available (functional check, not URL-based)
             try:
-                page.wait_for_selector('input[type="file"]', timeout=90000, state="attached")
+                page.wait_for_selector('input[type="file"]', timeout=270000, state="attached")
                 logger.info("Login successful - upload interface detected")
             except Exception:
                 # Check if still on login page
@@ -350,12 +358,12 @@ def _upload_to_tiktok_with_manager(
         logger.info("Uploading video file")
         try:
             file_input_selector = 'input[type="file"]'
-            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=10000)
+            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=30000)
             file_input.set_input_files(video_path)
         except Exception as e:
             logger.warning(f"Primary file selector failed, trying alternative: {e}")
             file_input_selector = '[data-e2e="upload-input"]'
-            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=10000)
+            file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=30000)
             file_input.set_input_files(video_path)
         
         logger.info("File upload initiated, waiting for processing signals...")
@@ -367,7 +375,7 @@ def _upload_to_tiktok_with_manager(
             caption_input_ready = False
             for selector in ['[data-e2e="caption-input"]', 'div[contenteditable="true"]']:
                 try:
-                    page.wait_for_selector(selector, timeout=120000, state="visible")
+                    page.wait_for_selector(selector, timeout=360000, state="visible")
                     logger.info(f"Upload processing complete - caption input available ({selector})")
                     caption_input_ready = True
                     break
@@ -378,7 +386,7 @@ def _upload_to_tiktok_with_manager(
         except Exception as e:
             logger.warning(f"Could not confirm upload processing completed: {e}")
             # Fallback to delay if selector not found
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(15000)
         
         # Fill in caption (title + description + tags)
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
@@ -417,7 +425,7 @@ def _upload_to_tiktok_with_manager(
             try:
                 caption_selector = 'div[contenteditable="true"]'
                 logger.warning(f"Using generic selector as fallback: {caption_selector}")
-                element = page.wait_for_selector(caption_selector, timeout=10000)
+                element = page.wait_for_selector(caption_selector, timeout=30000)
                 element.click()
                 page.keyboard.press("Control+A")
                 page.keyboard.press("Backspace")
@@ -426,17 +434,25 @@ def _upload_to_tiktok_with_manager(
             except:
                 logger.error("All caption selectors failed - caption not entered")
         
-        page.wait_for_timeout(random.randint(2000, 3000))
+        page.wait_for_timeout(random.randint(6000, 9000))
         
         # Click Post/Upload button
         logger.info("Clicking Post button")
         try:
             # Stable selectors: data-e2e + role-based + text fallbacks
             # TikTok uses div[role="button"] or button elements
-            post_button_selector = '[data-e2e="post-button"], div[role="button"]:has-text("Post"), button:has-text("Post")'
+            # Use specific selectors that won't match Discard button
+            # Priority: data-e2e (most reliable) > role-based > element type
+            post_selectors = [
+                '[data-e2e="post-button"]',  # TikTok's official test attribute
+                'div[role="button"]:has-text("Post")',
+                'button:has-text("Post")'
+            ]
+            # Filter to exclude any button containing "Discard"
+            post_button_selector = ', '.join([f'{s}:not(:has-text("Discard"))' for s in post_selectors])
             
             # Wait for button to be available
-            post_button = page.wait_for_selector(post_button_selector, timeout=10000, state="visible")
+            post_button = page.wait_for_selector(post_button_selector, timeout=30000, state="visible")
             
             # CRITICAL FIX: Use no_wait_after=True to prevent browser context closure
             # The Post button may trigger navigation/redirect which can close the context
@@ -446,7 +462,7 @@ def _upload_to_tiktok_with_manager(
             logger.info("Post button clicked successfully")
             
             # Wait for submission to process
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(9000)
         except Exception as e:
             logger.error(f"Failed to click Post button: {e}")
             # Re-raise with context to preserve exception chain
@@ -454,7 +470,7 @@ def _upload_to_tiktok_with_manager(
         
         # Wait for upload confirmation
         logger.info("Waiting for upload confirmation...")
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(15000)
         
         # Check for success indicators - be honest about what we can detect
         current_url = page.url
