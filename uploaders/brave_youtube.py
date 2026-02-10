@@ -53,7 +53,7 @@ def upload_to_youtube_browser(
         # Navigate to YouTube Studio upload
         logger.info("Navigating to YouTube Studio")
         try:
-            page.goto("https://studio.youtube.com/", wait_until="domcontentloaded", timeout=60000)
+            page.goto("https://studio.youtube.com/", wait_until="domcontentloaded", timeout=180000)
             browser.human_delay(2, 4)
         except Exception as e:
             if "Timeout" in str(e):
@@ -68,7 +68,7 @@ def upload_to_youtube_browser(
         if "accounts.google.com" in page.url:
             logger.warning("YouTube login required - please log in manually")
             logger.info("Waiting 60 seconds for manual login...")
-            page.wait_for_url("**/studio.youtube.com/**", timeout=60000)
+            page.wait_for_url("**/studio.youtube.com/**", timeout=180000)
             logger.info("Login successful, continuing upload")
         
         # Click "Create" button (video camera icon)
@@ -311,7 +311,7 @@ def _upload_to_youtube_with_manager(
         # Navigate to YouTube Studio upload
         logger.info("Navigating to YouTube Studio")
         try:
-            page.goto("https://studio.youtube.com/", wait_until="domcontentloaded", timeout=60000)
+            page.goto("https://studio.youtube.com/", wait_until="domcontentloaded", timeout=180000)
             page.wait_for_timeout(random.randint(2000, 4000))
         except Exception as e:
             if "Timeout" in str(e):
@@ -326,7 +326,7 @@ def _upload_to_youtube_with_manager(
         if "accounts.google.com" in page.url:
             logger.warning("YouTube login required - please log in manually")
             logger.info("Waiting 60 seconds for manual login...")
-            page.wait_for_url("**/studio.youtube.com/**", timeout=60000)
+            page.wait_for_url("**/studio.youtube.com/**", timeout=180000)
             logger.info("Login successful, continuing upload")
         
         # Click "Create" button (video camera icon)

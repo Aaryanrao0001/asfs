@@ -33,7 +33,7 @@ class TestInstagramPostButtonFix(unittest.TestCase):
     
     def test_select_post_option_function_exists(self):
         """Verify _select_post_option() helper function exists."""
-        self.assertIn('def _select_post_option(page: Page, timeout: int = 15000) -> bool:',
+        self.assertIn('def _select_post_option(page: Page, timeout: int = 45000) -> bool:',
                      self.content,
                      "_select_post_option function not found")
         
@@ -41,44 +41,40 @@ class TestInstagramPostButtonFix(unittest.TestCase):
         self.assertIn('Instagram A/B tests multiple UI variants', 
                      self.content,
                      "Function docstring doesn't describe A/B testing variants")
-        self.assertIn('Try all variants with retries for React animation delays',
+        self.assertIn('uses <a role="link"> elements',
                      self.content,
-                     "Function docstring doesn't explain retry logic")
+                     "Function docstring doesn't mention link elements")
     
     def test_select_post_option_implementation(self):
         """Verify _select_post_option() has correct implementation."""
-        # Check for multiple selectors (multi-variant support)
-        self.assertIn('possible_selectors = [',
+        # Check for menu container wait
+        self.assertIn('div[aria-hidden="false"]',
                      self.content,
-                     "Missing possible_selectors list for multi-variant support")
+                     "Missing menu container wait")
         
-        # Check for all variant selectors
-        self.assertIn('div[role="button"]:has-text("Post")',
+        # Check for menu item logging
+        self.assertIn('a[role="link"]',
                      self.content,
-                     "Missing Post button locator")
-        self.assertIn('div[role="button"]:has-text("Create post")',
+                     "Missing link role selector")
+        self.assertIn('instagram_menu_variants.json',
                      self.content,
-                     "Missing Create post button locator")
-        self.assertIn('div[role="button"]:has-text("Reel")',
-                     self.content,
-                     "Missing Reel fallback locator")
+                     "Missing menu variants logging")
         
-        # Check for wait states
-        self.assertIn('button.first.wait_for(state="visible"', self.content,
-                     "Missing visibility wait in _select_post_option")
-        self.assertIn('button.first.wait_for(state="enabled"', self.content,
-                     "Missing enabled wait in _select_post_option")
-        
-        # Check for click and logging
+        # Check for all variant selectors (now in selectors.py)
         self.assertIn('Post option clicked successfully', self.content,
                      "Missing success log message")
         self.assertIn('Post option button not found with any variant', self.content,
                      "Missing error log for Post button not found")
+        
+        # Check for fallback logic
+        self.assertIn('attempting fallback: click first menu item',
+                     self.content,
+                     "Missing fallback to click first menu item")
     
     def test_ui_selector_wait_instead_of_networkidle(self):
         """Verify UI selector wait is used instead of networkidle."""
         # Check that we wait for the Create button selector as UI readiness indicator
-        self.assertIn('page.wait_for_selector(\'svg[aria-label="New post"]\', timeout=30000)',
+        self.assertIn('page.wait_for_selector(\'svg[aria-label="New post"]\', timeout=90000)',
                      self.content,
                      "Missing UI selector wait for Create button")
         

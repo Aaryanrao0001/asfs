@@ -48,12 +48,12 @@ class TestTikTokTimeoutFix(unittest.TestCase):
                             f"wait_until should be domcontentloaded in: {line}")
     
     def test_60_second_timeout(self):
-        """Verify both functions use 60-second timeout (60000ms)."""
-        # Check that 60000ms timeout is used
-        self.assertIn('timeout=60000', self.content,
-                     "Missing 'timeout=60000' in TikTok navigation")
+        """Verify both functions use extended timeout (180000ms/180 seconds)."""
+        # Check that 180000ms timeout is used (3x longer for slow networks)
+        self.assertIn('timeout=180000', self.content,
+                     "Missing 'timeout=180000' in TikTok navigation")
         
-        # Check we no longer use 30000ms for TikTok upload
+        # Check we no longer use short 30000ms for TikTok upload
         goto_lines = [line for line in self.content.split('\n') 
                       if 'page.goto' in line and 'tiktok.com/upload' in line]
         for line in goto_lines:
@@ -88,14 +88,14 @@ class TestTikTokTimeoutFix(unittest.TestCase):
         manager_func_body = '\n'.join(lines[manager_func_start:manager_func_start+200])
         
         # Verify browser function has the fixes
-        self.assertIn('timeout=60000', browser_func_body,
-                     "upload_to_tiktok_browser missing timeout=60000")
+        self.assertIn('timeout=180000', browser_func_body,
+                     "upload_to_tiktok_browser missing timeout=180000")
         self.assertIn('domcontentloaded', browser_func_body,
                      "upload_to_tiktok_browser missing domcontentloaded")
         
         # Verify manager function has the fixes
-        self.assertIn('timeout=60000', manager_func_body,
-                     "_upload_to_tiktok_with_manager missing timeout=60000")
+        self.assertIn('timeout=180000', manager_func_body,
+                     "_upload_to_tiktok_with_manager missing timeout=180000")
         self.assertIn('domcontentloaded', manager_func_body,
                      "_upload_to_tiktok_with_manager missing domcontentloaded")
 
@@ -126,15 +126,15 @@ class TestYouTubeTimeoutFix(unittest.TestCase):
                             f"wait_until should be domcontentloaded in: {line}")
     
     def test_60_second_timeout(self):
-        """Verify both functions use 60-second timeout (60000ms)."""
-        # Check that 60000ms timeout is used
-        self.assertIn('timeout=60000', self.content,
-                     "Missing 'timeout=60000' in YouTube navigation")
+        """Verify both functions use extended timeout (180000ms)."""
+        # Check that 180000ms timeout is used
+        self.assertIn('timeout=180000', self.content,
+                     "Missing 'timeout=180000' in YouTube navigation")
         
         # Count occurrences - should have at least 2 (one for each function)
-        count = self.content.count('timeout=60000')
+        count = self.content.count('timeout=180000')
         self.assertGreaterEqual(count, 2,
-                               f"Expected at least 2 occurrences of timeout=60000, found {count}")
+                               f"Expected at least 2 occurrences of timeout=180000, found {count}")
     
     def test_timeout_error_handling(self):
         """Verify proper error handling for timeout errors."""
@@ -186,14 +186,14 @@ class TestYouTubeTimeoutFix(unittest.TestCase):
         manager_func_body = '\n'.join(lines[manager_func_start:manager_func_start+200])
         
         # Verify browser function has the fixes
-        self.assertIn('timeout=60000', browser_func_body,
-                     "upload_to_youtube_browser missing timeout=60000")
+        self.assertIn('timeout=180000', browser_func_body,
+                     "upload_to_youtube_browser missing timeout=180000")
         self.assertIn('domcontentloaded', browser_func_body,
                      "upload_to_youtube_browser missing domcontentloaded")
         
         # Verify manager function has the fixes
-        self.assertIn('timeout=60000', manager_func_body,
-                     "_upload_to_youtube_with_manager missing timeout=60000")
+        self.assertIn('timeout=180000', manager_func_body,
+                     "_upload_to_youtube_with_manager missing timeout=180000")
         self.assertIn('domcontentloaded', manager_func_body,
                      "_upload_to_youtube_with_manager missing domcontentloaded")
 
@@ -202,15 +202,15 @@ class TestAllUploadersConsistent(unittest.TestCase):
     """Test that all three uploaders use consistent timeout and wait strategies."""
     
     def test_all_use_60_second_timeout(self):
-        """Verify Instagram, TikTok, and YouTube all use 60-second timeout."""
+        """Verify Instagram, TikTok, and YouTube all use extended timeout (180000ms)."""
         instagram_file = Path(__file__).parent / "uploaders" / "brave_instagram.py"
         tiktok_file = Path(__file__).parent / "uploaders" / "brave_tiktok.py"
         youtube_file = Path(__file__).parent / "uploaders" / "brave_youtube.py"
         
         for uploader_file in [instagram_file, tiktok_file, youtube_file]:
             content = uploader_file.read_text(encoding='utf-8')
-            self.assertIn('timeout=60000', content,
-                         f"{uploader_file.name} missing timeout=60000")
+            self.assertIn('timeout=180000', content,
+                         f"{uploader_file.name} missing timeout=180000")
     
     def test_all_use_domcontentloaded(self):
         """Verify Instagram, TikTok, and YouTube all use domcontentloaded."""
