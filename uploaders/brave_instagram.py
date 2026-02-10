@@ -81,6 +81,7 @@ def _find_caption_input(page: Page):
     
     Instagram has multiple div[role="textbox"] elements.
     We need to target the caption specifically to avoid typing into wrong fields.
+    Uses selectors with ARIA labels: [aria-label*="caption"]
     
     Args:
         page: Playwright Page object
