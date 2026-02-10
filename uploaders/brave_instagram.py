@@ -214,7 +214,7 @@ def upload_to_instagram_browser(
             # Increased timeout by 3x (30s → 90s)
             page.wait_for_selector('svg[aria-label="New post"]', timeout=90000)
             logger.info("Page loaded and UI ready")
-            browser.human_delay(3, 6)  # Increased by 1.5x
+            browser.human_delay(3, 6)  # Increased by 3x (2-4s → 6-12s for actual implementation)
         except Exception as e:
             if "Timeout" in str(e):
                 logger.error("Instagram navigation timed out. Possible causes:")

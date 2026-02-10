@@ -172,7 +172,15 @@ def upload_to_tiktok_browser(
         try:
             # Stable selectors: data-e2e + role-based + text fallbacks
             # TikTok uses div[role="button"] or button elements
-            post_button_selector = '[data-e2e="post-button"]:not(:has-text("Discard")), div[role="button"]:has-text("Post"):not(:has-text("Discard")), button:has-text("Post"):not(:has-text("Discard"))'
+            # Use specific selectors that won't match Discard button
+            # Priority: data-e2e (most reliable) > role-based > element type
+            post_selectors = [
+                '[data-e2e="post-button"]',  # TikTok's official test attribute
+                'div[role="button"]:has-text("Post")',
+                'button:has-text("Post")'
+            ]
+            # Filter to exclude any button containing "Discard"
+            post_button_selector = ', '.join([f'{s}:not(:has-text("Discard"))' for s in post_selectors])
             
             # Wait for button to be available
             post_button = page.wait_for_selector(post_button_selector, timeout=30000, state="visible")
@@ -433,7 +441,15 @@ def _upload_to_tiktok_with_manager(
         try:
             # Stable selectors: data-e2e + role-based + text fallbacks
             # TikTok uses div[role="button"] or button elements
-            post_button_selector = '[data-e2e="post-button"]:not(:has-text("Discard")), div[role="button"]:has-text("Post"):not(:has-text("Discard")), button:has-text("Post"):not(:has-text("Discard"))'
+            # Use specific selectors that won't match Discard button
+            # Priority: data-e2e (most reliable) > role-based > element type
+            post_selectors = [
+                '[data-e2e="post-button"]',  # TikTok's official test attribute
+                'div[role="button"]:has-text("Post")',
+                'button:has-text("Post")'
+            ]
+            # Filter to exclude any button containing "Discard"
+            post_button_selector = ', '.join([f'{s}:not(:has-text("Discard"))' for s in post_selectors])
             
             # Wait for button to be available
             post_button = page.wait_for_selector(post_button_selector, timeout=30000, state="visible")
