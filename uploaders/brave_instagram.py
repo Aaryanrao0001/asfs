@@ -101,10 +101,11 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
                 aria_disabled = button.get_attribute('aria-disabled')
                 disabled_attr = button.get_attribute('disabled')
                 
-                if aria_disabled == 'true' or disabled_attr is not None:
+                # Check for disabled state - either aria-disabled='true' or disabled attribute exists
+                if aria_disabled == 'true' or (disabled_attr is not None and disabled_attr != 'false'):
                     is_disabled = True
                     logger.debug(f"{button_text} button still disabled, waiting... (elapsed: {elapsed:.1f}s)")
-                    page.wait_for_timeout(1000)  # Wait 1 second before checking again
+                    page.wait_for_timeout(500)  # Wait 500ms before checking again (faster polling)
                 else:
                     # Button is enabled
                     logger.debug(f"{button_text} button enabled after {elapsed:.1f}s")

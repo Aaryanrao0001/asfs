@@ -389,9 +389,9 @@ def get_tiktok_selectors() -> SelectorManager:
         description="Contenteditable plaintext-only mode (new TikTok UI pattern)"
     )
     caption_group.add_selector(
-        value='div[data-text][contenteditable]',
+        value='div[data-text][contenteditable="true"]',
         priority=2,
-        description="Data-text with any contenteditable state"
+        description="Data-text with contenteditable=true"
     )
     caption_group.add_selector(
         value='div[contenteditable="true"][aria-label*="caption" i]',
