@@ -580,43 +580,88 @@ def _find_caption_input(page: Page):
 
 def _trigger_share_with_keyboard(page: Page, caption_box) -> None:
     """
-    Trigger Instagram Share button using keyboard navigation (TAB+TAB+ENTER).
+    Trigger Instagram Share button using keyboard navigation (TAB 11x + ENTER).
     
     This approach avoids DOM overlays, spinners, and phantom Share button clones
     that cause traditional click-based automation to fail.
     
     IMPORTANT: This assumes Instagram's UI tab order places the Share button
-    exactly 2 TAB presses away from the caption input. If Instagram changes
-    their UI layout or tab order, this may need adjustment.
+    exactly 11 TAB presses away from the caption input. If the first attempt
+    fails, we refocus the caption, type a dummy character, and retry.
     
     Args:
         page: Playwright Page object
         caption_box: Caption input element (must be already found and filled)
         
     Raises:
-        Exception: If keyboard shortcut fails
+        Exception: If keyboard shortcut fails after fallback
     """
-    logger.info("Focusing caption input and using TAB+TAB+ENTER to trigger Share")
+    logger.info("Focusing caption input and using TAB 11x + ENTER to trigger Share")
+    
+    def _attempt_tab_navigation(attempt_num: int = 1) -> bool:
+        """
+        Internal helper to attempt TAB navigation to Share button.
+        
+        Args:
+            attempt_num: Attempt number for logging
+            
+        Returns:
+            True if successful, False if needs retry
+        """
+        try:
+            # Step 1: Ensure caption input is focused
+            logger.info(f"Attempt {attempt_num}: Focusing caption input")
+            caption_box.focus()
+            page.wait_for_timeout(KEYBOARD_FOCUS_WAIT_MS)
+            
+            # Step 2: Press TAB 11 times to navigate to Share button
+            logger.info(f"Attempt {attempt_num}: Pressing TAB 11 times to reach Share button")
+            for i in range(11):
+                page.keyboard.press("Tab")
+                page.wait_for_timeout(KEYBOARD_TAB_WAIT_MS)
+                if (i + 1) % 3 == 0:  # Log every 3rd TAB for progress tracking
+                    logger.info(f"Attempt {attempt_num}: Tabbing... ({i + 1}/11)")
+            
+            logger.info(f"Attempt {attempt_num}: All 11 TABs completed")
+            
+            # Step 3: Press ENTER to activate Share button
+            logger.info(f"Attempt {attempt_num}: Attempting ENTER to activate Share")
+            page.keyboard.press("Enter")
+            logger.info(f"Attempt {attempt_num}: ENTER pressed - Share should be triggered")
+            
+            # Wait for upload transition
+            page.wait_for_timeout(KEYBOARD_SUBMIT_WAIT_MS)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Attempt {attempt_num}: Navigation failed: {e}")
+            return False
+    
+    # First attempt
+    if _attempt_tab_navigation(attempt_num=1):
+        return
+    
+    # Fallback: Refocus caption, type dummy character, and retry
+    logger.warning("First attempt failed, using fallback strategy")
     try:
-        # Ensure caption input is focused
-        caption_box.focus()
+        logger.info("Fallback: Clicking caption input to refocus")
+        caption_box.click()
         page.wait_for_timeout(KEYBOARD_FOCUS_WAIT_MS)
         
-        # Send TAB twice to navigate to Share button
-        # Based on Instagram's current UI tab order (as of 2025)
-        page.keyboard.press("Tab")
-        page.wait_for_timeout(KEYBOARD_TAB_WAIT_MS)
-        page.keyboard.press("Tab")
+        logger.info("Fallback: Typing dummy character (space)")
+        page.keyboard.type(" ")
         page.wait_for_timeout(KEYBOARD_TAB_WAIT_MS)
         
-        # Send ENTER to trigger upload
-        page.keyboard.press("Enter")
-        logger.info("TAB+TAB+ENTER sent to trigger Share")
+        # Retry TAB navigation
+        if _attempt_tab_navigation(attempt_num=2):
+            logger.info("Fallback successful - Share triggered")
+            return
         
-        # Wait for upload transition
-        page.wait_for_timeout(KEYBOARD_SUBMIT_WAIT_MS)
+        raise Exception("Share button keyboard navigation failed after fallback attempt")
+        
     except Exception as e:
-        logger.error(f"Failed to send TAB+TAB+ENTER shortcut: {e}")
+        logger.error(f"Fallback failed: {e}")
         raise Exception(f"Share button keyboard shortcut failed - cannot complete upload: {e}")
 
 
