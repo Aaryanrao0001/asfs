@@ -71,7 +71,9 @@ class MainWindow(QMainWindow):
         """Connect all UI signals to handlers."""
         # Input tab
         self.input_tab.video_selected.connect(self.on_video_selected)
+        self.input_tab.videos_selected.connect(self.on_videos_selected)
         self.input_tab.output_changed.connect(self.on_output_changed)
+        self.input_tab.cache_changed.connect(self.on_cache_changed)
         
         # AI tab
         self.ai_tab.settings_changed.connect(self.on_ai_settings_changed)
@@ -92,9 +94,19 @@ class MainWindow(QMainWindow):
         logger.info(f"Video selected: {path}")
         self.save_settings()
     
+    def on_videos_selected(self, paths: list):
+        """Handle multiple videos selection."""
+        logger.info(f"{len(paths)} videos selected")
+        self.save_settings()
+    
     def on_output_changed(self, path: str):
         """Handle output directory change."""
         logger.info(f"Output directory changed: {path}")
+        self.save_settings()
+    
+    def on_cache_changed(self, use_cache: bool):
+        """Handle cache setting change."""
+        logger.info(f"Cache setting changed: {use_cache}")
         self.save_settings()
     
     def on_ai_settings_changed(self, settings: dict):
@@ -116,17 +128,41 @@ class MainWindow(QMainWindow):
         """Handle run pipeline request."""
         # Validate inputs
         video_path = self.input_tab.get_video_path()
+        selected_videos = self.input_tab.get_selected_videos()
         
-        if not video_path or not os.path.exists(video_path):
+        # Check if we have any videos selected
+        if not selected_videos:
             QMessageBox.warning(
                 self,
                 "Invalid Input",
-                "Please select a valid video file before running the pipeline."
+                "Please select a video file or folder before running the pipeline."
+            )
+            self.run_tab.pipeline_finished(False)
+            return
+        
+        # For now, only process first video (TODO: add batch processing)
+        if len(selected_videos) > 1:
+            QMessageBox.information(
+                self,
+                "Batch Processing",
+                f"Selected {len(selected_videos)} videos.\n\n"
+                "Currently processing first video only.\n"
+                "Full batch processing will be added in a future update."
+            )
+        
+        video_path = selected_videos[0]
+        
+        if not os.path.exists(video_path):
+            QMessageBox.warning(
+                self,
+                "Invalid Input",
+                "Selected video file does not exist."
             )
             self.run_tab.pipeline_finished(False)
             return
         
         output_dir = self.input_tab.get_output_path()
+        use_cache = self.input_tab.get_use_cache()
         
         # Gather all configuration
         config = {
@@ -135,8 +171,12 @@ class MainWindow(QMainWindow):
             "upload": self.upload_tab.get_settings()
         }
         
+        # Log cache status
+        cache_status = "enabled" if use_cache else "disabled (forcing fresh processing)"
+        self.run_tab.append_log(f"Cache: {cache_status}\n")
+        
         # Configure and start worker
-        self.pipeline_worker.configure(video_path, output_dir, config)
+        self.pipeline_worker.configure(video_path, output_dir, config, use_cache)
         self.run_tab.pipeline_started()
         self.pipeline_worker.start()
         
