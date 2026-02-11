@@ -36,6 +36,7 @@ ENV/
 # Logs
 *.log
 pipeline.log
+logs/
 
 # Output directories
 output/
@@ -45,6 +46,9 @@ state/  # Pipeline state files (rate limiting, resumption)
 
 # Audit database
 audit/events.db
+
+# Video registry database
+database/videos.db
 
 # Environment variables
 .env
