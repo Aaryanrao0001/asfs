@@ -282,12 +282,15 @@ def _select_post_option(page: Page, timeout: int = 45000) -> bool:
                 # Try to interact with the first matching element
                 button.first.wait_for(state="visible", timeout=9000)
                 
-                # For link elements, check if they're enabled (not disabled)
+                # For link elements, just click (they don't have enabled/disabled state)
                 if 'a[role="link"]' in selector.value or 'a:has' in selector.value:
-                    # Links don't have enabled state, check if clickable
                     logger.info(f"Found Post option (link): {selector.value}")
                 else:
-                    button.first.wait_for(state="enabled", timeout=9000)
+                    # For button elements, check if not disabled
+                    aria_disabled = button.first.get_attribute('aria-disabled')
+                    if aria_disabled == 'true':
+                        logger.debug(f"Button is disabled, skipping: {selector.value}")
+                        continue
                     logger.info(f"Found Post option (button): {selector.value}")
                 
                 button.first.click()
