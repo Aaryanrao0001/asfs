@@ -42,10 +42,10 @@ KEYBOARD_SUBMIT_WAIT_MS = 3000 # Wait after pressing ENTER to trigger upload
 
 # Upload confirmation timeouts (in milliseconds)
 # These control how long we wait for Instagram to confirm upload
-UPLOAD_CONFIRMATION_WAIT_MS = 15000  # Wait for dialog disappearance or progress indicators
-UPLOAD_CONFIRMATION_CHECK_INTERVAL_MS = 1000  # Check every 1 second
-UPLOAD_MIN_SAFETY_WAIT_MS = 10000  # Minimum wait before closing (to ensure IG processes upload)
-MIN_TIMEOUT_MS = 1000  # Minimum timeout threshold to ensure positive timeout values
+UPLOAD_CONFIRMATION_WAIT_MS = 60000  # Wait for dialog disappearance or progress indicators
+UPLOAD_CONFIRMATION_CHECK_INTERVAL_MS = 5000  # Check every 1 second
+UPLOAD_MIN_SAFETY_WAIT_MS = 60000  # Minimum wait before closing (to ensure IG processes upload)
+MIN_TIMEOUT_MS = 5000  # Minimum timeout threshold to ensure positive timeout values
 
 # Legacy button click enhancement timeouts (in milliseconds)
 # These are kept for backwards compatibility with Next button logic
@@ -495,14 +495,14 @@ def _trigger_share_with_keyboard(page: Page, caption_box) -> None:
             page.wait_for_timeout(KEYBOARD_FOCUS_WAIT_MS)
             
             # Step 2: Press TAB 11 times to navigate to Share button
-            logger.info(f"Attempt {attempt_num}: Pressing TAB 11 times to reach Share button")
-            for i in range(11):
+            logger.info(f"Attempt {attempt_num}: Pressing TAB 9 times to reach Share button")
+            for i in range(9):
                 page.keyboard.press("Tab")
                 page.wait_for_timeout(KEYBOARD_TAB_WAIT_MS)
-                if (i + 1) % 3 == 0 or (i + 1) == 11:  # Log every 3rd TAB and the final one
-                    logger.info(f"Attempt {attempt_num}: Tabbing... ({i + 1}/11)")
+                if (i + 1) % 3 == 0 or (i + 1) == 9:  # Log every 3rd TAB and the final one
+                    logger.info(f"Attempt {attempt_num}: Tabbing... ({i + 1}/9)")
             
-            logger.info(f"Attempt {attempt_num}: All 11 TABs completed")
+            logger.info(f"Attempt {attempt_num}: All 9 TABs completed")
             
             # Step 3: Press ENTER to activate Share button
             logger.info(f"Attempt {attempt_num}: Attempting ENTER to activate Share")
