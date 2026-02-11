@@ -359,6 +359,9 @@ def _trigger_share_with_keyboard(page: Page, caption_box) -> None:
         page: Playwright Page object
         caption_box: Caption input element (must be already found and filled)
         
+    Returns:
+        None on success
+        
     Raises:
         Exception: If keyboard shortcut fails after fallback
     """
@@ -385,7 +388,7 @@ def _trigger_share_with_keyboard(page: Page, caption_box) -> None:
             for i in range(11):
                 page.keyboard.press("Tab")
                 page.wait_for_timeout(KEYBOARD_TAB_WAIT_MS)
-                if (i + 1) % 3 == 0:  # Log every 3rd TAB for progress tracking
+                if (i + 1) % 3 == 0 or (i + 1) == 11:  # Log every 3rd TAB and the final one
                     logger.info(f"Attempt {attempt_num}: Tabbing... ({i + 1}/11)")
             
             logger.info(f"Attempt {attempt_num}: All 11 TABs completed")
