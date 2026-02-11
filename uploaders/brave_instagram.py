@@ -42,6 +42,49 @@ SHARE_DISAPPEAR_TIMEOUT_MS = 5000  # Timeout for Share button to disappear
 # JS click expression for fallback when standard click fails
 JS_CLICK_EXPRESSION = 'el => el.click()'
 
+# JavaScript helper to check if button is truly clickable (not covered by overlays)
+JS_CHECK_CLICKABLE = """
+(element) => {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    const zIndex = style.zIndex;
+    const pointerEvents = style.pointerEvents;
+    const opacity = parseFloat(style.opacity);
+    
+    // Check if element has meaningful dimensions
+    const hasSize = rect.width > 0 && rect.height > 0;
+    
+    // Check if element is in viewport
+    const inViewport = rect.top >= 0 && rect.left >= 0 && 
+                      rect.bottom <= window.innerHeight && 
+                      rect.right <= window.innerWidth;
+    
+    // Check element at center point
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const elementAtPoint = document.elementFromPoint(centerX, centerY);
+    const isTopmost = elementAtPoint === element || element.contains(elementAtPoint);
+    
+    return {
+        rect: {
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+            centerX: centerX,
+            centerY: centerY
+        },
+        zIndex: zIndex,
+        pointerEvents: pointerEvents,
+        opacity: opacity,
+        hasSize: hasSize,
+        inViewport: inViewport,
+        isTopmost: isTopmost,
+        isClickable: hasSize && pointerEvents !== 'none' && opacity > 0.5 && isTopmost
+    };
+}
+"""
+
 
 def _try_js_click(button, button_text: str = "button") -> bool:
     """
@@ -67,6 +110,128 @@ def _try_js_click(button, button_text: str = "button") -> bool:
         return False
 
 
+def _get_clickable_button_info(button, button_text: str) -> dict:
+    """
+    Get detailed information about button clickability.
+    
+    Uses JavaScript to check:
+    - Bounding box and position
+    - Z-index and stacking context
+    - Pointer events and opacity
+    - Whether element is topmost at its center point
+    
+    Args:
+        button: Playwright Locator object
+        button_text: Text of the button for logging
+        
+    Returns:
+        Dictionary with button properties or None if check fails
+    """
+    try:
+        info = button.evaluate(JS_CHECK_CLICKABLE)
+        logger.debug(f"{button_text} button info: rect={info['rect']}, zIndex={info['zIndex']}, "
+                    f"pointerEvents={info['pointerEvents']}, opacity={info['opacity']}, "
+                    f"isClickable={info['isClickable']}, isTopmost={info['isTopmost']}")
+        return info
+    except Exception as e:
+        logger.debug(f"Could not get {button_text} button info: {e}")
+        return None
+
+
+def _find_best_share_button(page: Page, matching_buttons: list) -> tuple:
+    """
+    Find the best clickable Share button from multiple matches.
+    
+    Filters buttons to find the one that is:
+    - Visible and enabled
+    - Not covered by overlays
+    - Has pointer-events enabled
+    - Is topmost at its center point
+    - Has meaningful bounding box
+    
+    Args:
+        page: Playwright Page object
+        matching_buttons: List of button Locator objects
+        
+    Returns:
+        Tuple of (best_button, info_dict) or (None, None) if none suitable
+    """
+    logger.info(f"Analyzing {len(matching_buttons)} Share button candidates for clickability")
+    
+    clickable_buttons = []
+    
+    for i, btn in enumerate(matching_buttons):
+        try:
+            # First check basic visibility and enabled state
+            if not btn.is_visible():
+                logger.debug(f"Share button {i+1}: not visible, skipping")
+                continue
+            
+            # Check if disabled
+            aria_disabled = btn.get_attribute('aria-disabled')
+            if aria_disabled == 'true':
+                logger.debug(f"Share button {i+1}: disabled (aria-disabled=true), skipping")
+                continue
+            
+            # Get detailed clickability info
+            info = _get_clickable_button_info(btn, f"Share button {i+1}")
+            if not info:
+                logger.debug(f"Share button {i+1}: could not get info, skipping")
+                continue
+            
+            # Check if button is truly clickable
+            if not info['isClickable']:
+                logger.warning(f"Share button {i+1}: NOT clickable - "
+                             f"hasSize={info['hasSize']}, pointerEvents={info['pointerEvents']}, "
+                             f"opacity={info['opacity']}, isTopmost={info['isTopmost']}")
+                continue
+            
+            logger.info(f"Share button {i+1}: CLICKABLE - rect={info['rect']}, "
+                       f"zIndex={info['zIndex']}, pointerEvents={info['pointerEvents']}, "
+                       f"opacity={info['opacity']}")
+            clickable_buttons.append((btn, info))
+            
+        except Exception as e:
+            logger.debug(f"Error checking Share button {i+1}: {e}")
+            continue
+    
+    if not clickable_buttons:
+        logger.error("No clickable Share buttons found among candidates")
+        return None, None
+    
+    # If multiple clickable buttons, prefer the one closest to center and with highest z-index
+    if len(clickable_buttons) > 1:
+        logger.info(f"Found {len(clickable_buttons)} clickable Share buttons, selecting best one")
+        
+        def button_score(btn_info):
+            btn, info = btn_info
+            rect = info['rect']
+            # Distance from viewport center
+            viewport_center_x = page.viewport_size['width'] / 2
+            viewport_center_y = page.viewport_size['height'] / 2
+            dist_from_center = ((rect['centerX'] - viewport_center_x) ** 2 + 
+                               (rect['centerY'] - viewport_center_y) ** 2) ** 0.5
+            
+            # Z-index (higher is better, 'auto' treated as 0)
+            try:
+                z = int(info['zIndex']) if info['zIndex'] != 'auto' else 0
+            except:
+                z = 0
+            
+            # Score: prefer higher z-index and closer to center
+            # Normalize distance (divide by 1000) and z-index contribution
+            score = z * 100 - dist_from_center / 10
+            return score
+        
+        clickable_buttons.sort(key=button_score, reverse=True)
+        best_button, best_info = clickable_buttons[0]
+        logger.info(f"Selected best Share button: zIndex={best_info['zIndex']}, "
+                   f"rect={best_info['rect']}")
+        return best_button, best_info
+    
+    return clickable_buttons[0]
+
+
 def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000) -> bool:
     """
     Click button only when it's enabled and ready.
@@ -87,6 +252,12 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
     3. Fallback to JS click (evaluate) if standard click fails
     4. For Share button: implement double-click retry if button still visible
     5. Wait for Share button disappearance as success indicator
+    
+    For Share button specifically:
+    1. Find ALL Share buttons matching selectors
+    2. Filter for only visible, enabled, and truly clickable ones (check z-index, pointer-events, bounding box)
+    3. Select the best one (topmost, closest to center)
+    4. Verify button disappearance after click - REQUIRED for success
     
     Args:
         page: Playwright Page object
@@ -145,10 +316,20 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
                         continue
                 
                 if matching_buttons:
-                    # Select the last visible button (Instagram often has multiple, we want the final one)
-                    button = matching_buttons[-1]
-                    successful_selector = f"{role_selector} (filtered by text '{button_text}', selected last of {len(matching_buttons)})"
-                    logger.info(f"{button_text} button found with role-based selector: {successful_selector}")
+                    # For Share button, use enhanced selection to find truly clickable one
+                    if button_text.lower() == "share":
+                        button, button_info = _find_best_share_button(page, matching_buttons)
+                        if button:
+                            successful_selector = f"{role_selector} (filtered by text '{button_text}', enhanced clickability check, selected best from {len(matching_buttons)})"
+                            logger.info(f"{button_text} button found with enhanced selection: {successful_selector}")
+                        else:
+                            logger.error(f"Found {len(matching_buttons)} Share button candidates but none are truly clickable")
+                            button = None
+                    else:
+                        # For non-Share buttons, use original logic
+                        button = matching_buttons[-1]
+                        successful_selector = f"{role_selector} (filtered by text '{button_text}', selected last of {len(matching_buttons)})"
+                        logger.info(f"{button_text} button found with role-based selector: {successful_selector}")
                 else:
                     logger.warning(f"No visible buttons with text '{button_text}' found among {len(all_buttons)} role buttons")
             except Exception as e:
@@ -175,9 +356,20 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
                         continue
                 
                 if matching_buttons:
-                    button = matching_buttons[-1]
-                    successful_selector = f"{fallback_selector} (filtered by text '{button_text}', selected last of {len(matching_buttons)})"
-                    logger.info(f"{button_text} button found with fallback selector: {successful_selector}")
+                    # For Share button, use enhanced selection to find truly clickable one
+                    if button_text.lower() == "share":
+                        button, button_info = _find_best_share_button(page, matching_buttons)
+                        if button:
+                            successful_selector = f"{fallback_selector} (filtered by text '{button_text}', enhanced clickability check, selected best from {len(matching_buttons)})"
+                            logger.info(f"{button_text} button found with enhanced fallback selection: {successful_selector}")
+                        else:
+                            logger.error(f"Found {len(matching_buttons)} Share button candidates in fallback but none are truly clickable")
+                            button = None
+                    else:
+                        # For non-Share buttons, use original logic
+                        button = matching_buttons[-1]
+                        successful_selector = f"{fallback_selector} (filtered by text '{button_text}', selected last of {len(matching_buttons)})"
+                        logger.info(f"{button_text} button found with fallback selector: {successful_selector}")
             except Exception as e:
                 logger.warning(f"Fallback selector strategy failed: {e}")
         
@@ -319,12 +511,18 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
                 logger.debug(f"Could not check button visibility after click (likely disappeared or detached): {e}")
             
             # Wait for button to disappear as success indicator
+            # This is MANDATORY for Share button - upload cannot be confirmed without it
             try:
                 logger.info("Waiting for Share button to disappear (indicates upload started)")
                 button.wait_for(state="hidden", timeout=SHARE_DISAPPEAR_TIMEOUT_MS)
                 logger.info("Share button disappeared - upload initiated successfully")
             except Exception as e:
-                logger.warning(f"Share button did not disappear within {SHARE_DISAPPEAR_TIMEOUT_MS}ms, but click was performed: {e}")
+                logger.error(f"CRITICAL: Share button did not disappear within {SHARE_DISAPPEAR_TIMEOUT_MS}ms")
+                logger.error(f"Upload NOT confirmed - button still visible or click was intercepted by overlay")
+                logger.error(f"This indicates the upload was NOT actually submitted to Instagram")
+                logger.error(f"Possible causes: overlay blocking click, wrong button selected, or UI changed")
+                logger.error(f"Manual review required - DO NOT mark as successful")
+                return False
         
         return True
     except PlaywrightTimeoutError:
