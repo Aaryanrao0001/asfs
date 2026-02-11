@@ -34,8 +34,12 @@ class TestShareButtonEnhancements(unittest.TestCase):
     
     def test_has_js_click_fallback(self):
         """Verify function includes JS click fallback using evaluate."""
-        self.assertIn("button.evaluate('el => el.click()')", self.content,
-                     "Missing JS click fallback: button.evaluate('el => el.click()')")
+        # Check that JS click is used (either directly or via constant)
+        has_js_click = ("button.evaluate('el => el.click()')" in self.content or 
+                       "button.evaluate(JS_CLICK_EXPRESSION)" in self.content or
+                       "JS_CLICK_EXPRESSION = 'el => el.click()'" in self.content)
+        self.assertTrue(has_js_click,
+                     "Missing JS click fallback: button.evaluate with el => el.click()")
         self.assertIn('JS click fallback', self.content,
                      "Missing JS click fallback logging")
     

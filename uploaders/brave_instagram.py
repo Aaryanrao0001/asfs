@@ -34,6 +34,14 @@ INSTAGRAM_CREATE_SELECTORS = [
 ]
 INSTAGRAM_CREATE_SELECTOR = INSTAGRAM_CREATE_SELECTORS[0]
 
+# Share button click enhancement timeouts (in milliseconds)
+OVERLAY_CLEAR_WAIT_MS = 2000  # Wait time after detecting overlay
+SHARE_RETRY_WAIT_MS = 1000    # Wait time before retry click
+SHARE_DISAPPEAR_TIMEOUT_MS = 5000  # Timeout for Share button to disappear
+
+# JS click expression for fallback when standard click fails
+JS_CLICK_EXPRESSION = 'el => el.click()'
+
 
 def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000) -> bool:
     """
@@ -48,6 +56,13 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
     3. Last resort: role-based selector without tabindex requirement
     4. For multiple matches, select last visible and enabled button
     5. Scroll into view if needed before clicking
+    
+    Enhanced click strategy (especially for Share button):
+    1. Check for overlays/spinners before clicking
+    2. Try standard Playwright click first
+    3. Fallback to JS click (evaluate) if standard click fails
+    4. For Share button: implement double-click retry if button still visible
+    5. Wait for Share button disappearance as success indicator
     
     Args:
         page: Playwright Page object
@@ -235,8 +250,8 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
                     pass
             
             if has_overlay:
-                logger.warning("Overlay detected before click, waiting 2s for it to clear")
-                page.wait_for_timeout(2000)
+                logger.warning(f"Overlay detected before click, waiting {OVERLAY_CLEAR_WAIT_MS}ms for it to clear")
+                page.wait_for_timeout(OVERLAY_CLEAR_WAIT_MS)
         except Exception as e:
             logger.debug(f"Could not check for overlays: {e}")
         
@@ -252,7 +267,7 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
         # Strategy 2: Fallback to JS click if standard click failed
         if not click_success:
             try:
-                button.evaluate('el => el.click()')
+                button.evaluate(JS_CLICK_EXPRESSION)
                 logger.info(f"{button_text} button clicked (JS click fallback) using selector: {successful_selector}")
                 click_success = True
             except Exception as e:
@@ -262,7 +277,7 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
         # For Share button specifically, implement additional measures
         if button_text.lower() == "share":
             # Wait a moment to see if the click took effect
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(SHARE_RETRY_WAIT_MS)
             
             # Check if button is still visible - if so, might need second click
             try:
@@ -273,7 +288,7 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
                         logger.info("Share button second click (standard) attempted")
                     except Exception:
                         try:
-                            button.evaluate('el => el.click()')
+                            button.evaluate(JS_CLICK_EXPRESSION)
                             logger.info("Share button second click (JS fallback) attempted")
                         except Exception as e:
                             logger.warning(f"Second click attempts failed: {e}")
@@ -284,10 +299,10 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
             # Wait for button to disappear as success indicator
             try:
                 logger.info("Waiting for Share button to disappear (indicates upload started)")
-                button.wait_for(state="hidden", timeout=5000)
+                button.wait_for(state="hidden", timeout=SHARE_DISAPPEAR_TIMEOUT_MS)
                 logger.info("Share button disappeared - upload initiated successfully")
             except Exception as e:
-                logger.warning(f"Share button did not disappear within 5s, but click was performed: {e}")
+                logger.warning(f"Share button did not disappear within {SHARE_DISAPPEAR_TIMEOUT_MS}ms, but click was performed: {e}")
         
         return True
     except PlaywrightTimeoutError:
