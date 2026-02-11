@@ -23,6 +23,17 @@ A **fully automated desktop application** that transforms long-form videos into 
 - One-click model downloads
 - Offline-capable AI scoring
 
+**🧠 Enhanced Viral Detection (NEW)**
+- Multi-layer viral clip detection with psychological scoring
+- Emotion analysis using VADER + NRC emotion lexicons
+- Hook quality enforcement (first 7 seconds analysis)
+- Narrative arc detection (hook → tension → payoff)
+- Semantic deduplication (removes similar clips)
+- Auto-generates titles, captions, hashtags, and overlays
+- Two-stage pipeline: fast filtering → deep LLM analysis
+- 6-factor virality model (Curiosity 25%, Emotion 20%, Contrarian 20%, etc.)
+- See [VIRAL_DETECTION_GUIDE.md](VIRAL_DETECTION_GUIDE.md) for details
+
 ## 🎯 Overview
 
 This system intelligently:
