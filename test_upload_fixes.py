@@ -96,10 +96,10 @@ class TestTikTokCaptionSelectorFix(unittest.TestCase):
     
     def test_drafteditor_selector(self):
         """Verify that DraftJS editor selector is present for current TikTok UI."""
-        self.assertIn('div.notranslate.public-DraftEditor-content', self.content,
-                     "Missing 'div.notranslate.public-DraftEditor-content' selector for DraftJS editor")
-        self.assertIn('[role="combobox"]', self.content,
-                     "Missing '[role=\"combobox\"]' selector attribute")
+        # Verify the complete selector with all attributes is present
+        complete_selector = 'div.notranslate.public-DraftEditor-content[contenteditable="true"][role="combobox"]'
+        self.assertIn(complete_selector, self.content,
+                     f"Missing complete DraftJS editor selector: {complete_selector}")
 
 
 class TestInstagramButtonFix(unittest.TestCase):
