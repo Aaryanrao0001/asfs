@@ -43,6 +43,30 @@ SHARE_DISAPPEAR_TIMEOUT_MS = 5000  # Timeout for Share button to disappear
 JS_CLICK_EXPRESSION = 'el => el.click()'
 
 
+def _try_js_click(button, button_text: str = "button") -> bool:
+    """
+    Attempt to click a button using JavaScript evaluation.
+    
+    Instagram's React-based buttons sometimes have JS event handlers that don't
+    respond to standard Playwright clicks. This function uses JS evaluation to
+    trigger the click event directly.
+    
+    Args:
+        button: Playwright Locator object for the button
+        button_text: Text of the button for logging purposes
+        
+    Returns:
+        True if click succeeded, False otherwise
+    """
+    try:
+        button.evaluate(JS_CLICK_EXPRESSION)
+        logger.info(f"{button_text} clicked using JS (el.click())")
+        return True
+    except Exception as e:
+        logger.debug(f"JS click failed for {button_text}: {e}")
+        return False
+
+
 def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000) -> bool:
     """
     Click button only when it's enabled and ready.
@@ -266,12 +290,11 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
         
         # Strategy 2: Fallback to JS click if standard click failed
         if not click_success:
-            try:
-                button.evaluate(JS_CLICK_EXPRESSION)
+            if _try_js_click(button, f"{button_text} button (JS fallback)"):
                 logger.info(f"{button_text} button clicked (JS click fallback) using selector: {successful_selector}")
                 click_success = True
-            except Exception as e:
-                logger.error(f"JS click fallback also failed: {e}")
+            else:
+                logger.error(f"JS click fallback also failed")
                 return False
         
         # For Share button specifically, implement additional measures
@@ -287,11 +310,10 @@ def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000)
                         button.click()
                         logger.info("Share button second click (standard) attempted")
                     except Exception:
-                        try:
-                            button.evaluate(JS_CLICK_EXPRESSION)
+                        if _try_js_click(button, "Share button (second click JS fallback)"):
                             logger.info("Share button second click (JS fallback) attempted")
-                        except Exception as e:
-                            logger.warning(f"Second click attempts failed: {e}")
+                        else:
+                            logger.warning("Second click attempts failed")
             except Exception as e:
                 # Button may have disappeared (good sign)
                 logger.debug(f"Could not check button visibility after click (may have disappeared): {e}")
