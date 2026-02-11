@@ -38,6 +38,7 @@ import logging
 import json
 import yaml
 import argparse
+import sqlite3
 from pathlib import Path
 from typing import Dict, List
 from dotenv import load_dotenv
@@ -59,6 +60,7 @@ from scheduler.queue import load_rate_limits
 from uploaders import upload_to_tiktok, upload_to_instagram, upload_to_youtube, BraveBrowserManager
 from audit import AuditLogger
 from cache import PipelineCache
+from database import VideoRegistry
 
 
 # Configure logging
@@ -562,21 +564,44 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                                     error_message=str(e))
             raise
         
-        # Stage 9: Scheduling
+        # Stage 9: Scheduling & Video Registration
         logger.info("\n" + "=" * 80)
-        logger.info("STAGE 9: UPLOAD SCHEDULING")
+        logger.info("STAGE 9: UPLOAD SCHEDULING & VIDEO REGISTRATION")
         logger.info("=" * 80)
         audit.log_pipeline_event("scheduling", "started", video_path)
         
         try:
+            # Initialize video registry
+            video_registry = VideoRegistry()
+            
+            # Register each clip as a video
+            for clip in extracted_clips:
+                video_id = clip['clip_id']
+                file_path = clip['file_path']
+                duration = clip.get('duration', 0)
+                
+                # Register video in database
+                video_registry.register_video(
+                    video_id=video_id,
+                    file_path=file_path,
+                    title=clip.get('clip_id'),  # Use clip_id as title
+                    duration=duration,
+                    duplicate_allowed=False,  # Default to no duplicates
+                    calculate_checksum=True
+                )
+                
+                logger.debug(f"[OK] Registered video: {video_id}")
+            
             queue = UploadQueue(config['rate_limits'])
             platforms = ["TikTok", "Instagram", "YouTube"]
             
             scheduled_tasks = queue.schedule_clips(extracted_clips, platforms)
             logger.info(f"[OK] Scheduled {len(scheduled_tasks)} upload tasks")
+            logger.info(f"[OK] Registered {len(extracted_clips)} videos in registry")
             
             audit.log_pipeline_event("scheduling", "completed", video_path,
-                                    {"scheduled_tasks": len(scheduled_tasks)})
+                                    {"scheduled_tasks": len(scheduled_tasks),
+                                     "registered_videos": len(extracted_clips)})
         except Exception as e:
             logger.error(f"[FAIL] Scheduling failed: {str(e)}")
             audit.log_pipeline_event("scheduling", "failed", video_path,
@@ -670,9 +695,30 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                 if not queue.can_upload(platform):
                     logger.info(f"Rate limit reached for {platform}, skipping for now")
                     audit.log_upload_event(clip_id, platform, "rate_limited")
+                    video_registry.record_upload_attempt(
+                        clip_id, platform, "RATE_LIMITED", 
+                        error_message="Rate limit reached"
+                    )
+                    continue
+                
+                # Check duplicate upload prevention
+                can_upload, block_reason = video_registry.can_upload(clip_id, platform)
+                if not can_upload:
+                    logger.warning(f"[BLOCKED] {block_reason}")
+                    audit.log_upload_event(clip_id, platform, "blocked", 
+                                          error_message=block_reason)
+                    video_registry.record_upload_attempt(
+                        clip_id, platform, "BLOCKED",
+                        error_message=block_reason
+                    )
                     continue
                 
                 try:
+                    # Record upload start
+                    video_registry.record_upload_attempt(
+                        clip_id, platform, "IN_PROGRESS"
+                    )
+                    
                     caption = clip['captions'].get(platform, "")
                     hashtags = clip['hashtags'].get(platform, [])
                     video_file = clip['file_path']
@@ -696,17 +742,62 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                         logger.info(f"[OK] Upload successful: {upload_id}")
                         queue.record_upload(platform, clip_id, success=True)
                         audit.log_upload_event(clip_id, platform, "success", upload_id)
+                        
+                        # Record success in video registry
+                        video_registry.record_upload_attempt(
+                            clip_id, platform, "SUCCESS",
+                            platform_post_id=upload_id
+                        )
+                        
                         successful_uploads += 1
                     else:
                         logger.warning(f"[FAIL] Upload failed (no ID returned)")
                         queue.record_upload(platform, clip_id, success=False)
                         audit.log_upload_event(clip_id, platform, "failed")
+                        
+                        # Increment retry count
+                        retry_count = video_registry.increment_retry_count(clip_id, platform)
+                        
+                        # Mark as FAILED_FINAL after 3 retries
+                        if retry_count >= 3:
+                            logger.error(f"[FAIL] Max retries reached for {clip_id} on {platform}")
+                            video_registry.record_upload_attempt(
+                                clip_id, platform, "FAILED_FINAL",
+                                error_message="Max retries exceeded",
+                                retry_count=retry_count
+                            )
+                        else:
+                            video_registry.record_upload_attempt(
+                                clip_id, platform, "FAILED",
+                                error_message="Upload failed - no ID returned",
+                                retry_count=retry_count
+                            )
+                        
                         failed_uploads += 1
                     
                 except Exception as e:
                     logger.error(f"[FAIL] Upload error for {platform}: {str(e)}")
                     queue.record_upload(platform, clip_id, success=False)
                     audit.log_upload_event(clip_id, platform, "failed", error_message=str(e))
+                    
+                    # Increment retry count
+                    retry_count = video_registry.increment_retry_count(clip_id, platform)
+                    
+                    # Mark as FAILED_FINAL after 3 retries
+                    if retry_count >= 3:
+                        logger.error(f"[FAIL] Max retries reached for {clip_id} on {platform}")
+                        video_registry.record_upload_attempt(
+                            clip_id, platform, "FAILED_FINAL",
+                            error_message=str(e),
+                            retry_count=retry_count
+                        )
+                    else:
+                        video_registry.record_upload_attempt(
+                            clip_id, platform, "FAILED",
+                            error_message=str(e),
+                            retry_count=retry_count
+                        )
+                    
                     failed_uploads += 1
                     # Continue to next upload instead of breaking
                     continue
@@ -743,6 +834,153 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         audit.log_pipeline_event("pipeline", "failed", video_path,
                                 error_message=str(e))
         raise
+
+
+def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> bool:
+    """
+    Execute direct upload for a specific video to a platform.
+    
+    This function skips pipeline stages 1-9 and directly uploads a video
+    that's already registered in the video registry. Used by the UI for
+    manual uploads and retries.
+    
+    Args:
+        video_id: Video ID from the registry
+        platform: Target platform (Instagram, TikTok, or YouTube)
+        metadata: Optional metadata override (caption, hashtags, etc.)
+        
+    Returns:
+        True if upload succeeded, False otherwise
+    """
+    logger.info(f"Direct upload: {video_id} to {platform}")
+    
+    # Initialize registry and audit
+    video_registry = VideoRegistry()
+    audit = AuditLogger()
+    
+    # Check if upload is allowed
+    can_upload, block_reason = video_registry.can_upload(video_id, platform)
+    if not can_upload:
+        logger.error(f"Upload blocked: {block_reason}")
+        return False
+    
+    # Get video info from registry
+    conn = sqlite3.connect(video_registry.db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM videos WHERE id = ?', (video_id,))
+    video = cursor.fetchone()
+    conn.close()
+    
+    if not video:
+        logger.error(f"Video {video_id} not found in registry")
+        return False
+    
+    video_file = video['file_path']
+    
+    # Validate file exists
+    if not os.path.exists(video_file):
+        logger.error(f"Video file not found: {video_file}")
+        video_registry.record_upload_attempt(
+            video_id, platform, "FAILED",
+            error_message="Video file not found"
+        )
+        return False
+    
+    # Load browser configuration
+    brave_path = os.getenv("BRAVE_PATH")
+    brave_user_data_dir = os.getenv("BRAVE_USER_DATA_DIR")
+    brave_profile_directory = os.getenv("BRAVE_PROFILE_DIRECTORY", "Default")
+    
+    credentials = {
+        "brave_path": brave_path,
+        "brave_user_data_dir": brave_user_data_dir,
+        "brave_profile_directory": brave_profile_directory
+    }
+    
+    # Use metadata if provided, otherwise use defaults
+    caption = metadata.get('caption', '') if metadata else ''
+    hashtags = metadata.get('hashtags', []) if metadata else []
+    
+    # Record upload start
+    video_registry.record_upload_attempt(video_id, platform, "IN_PROGRESS")
+    audit.log_upload_event(video_id, platform, "uploading")
+    
+    # Initialize browser manager
+    browser_manager = None
+    try:
+        browser_manager = BraveBrowserManager.get_instance()
+        browser_manager.initialize(
+            brave_path=brave_path,
+            user_data_dir=brave_user_data_dir,
+            profile_directory=brave_profile_directory
+        )
+        
+        # Execute upload
+        upload_id = None
+        
+        if platform == "TikTok":
+            upload_id = upload_to_tiktok(video_file, caption, hashtags, credentials)
+        elif platform == "Instagram":
+            upload_id = upload_to_instagram(video_file, caption, hashtags, credentials)
+        elif platform == "YouTube":
+            upload_id = upload_to_youtube(video_file, caption, hashtags, credentials)
+        else:
+            logger.error(f"Unknown platform: {platform}")
+            return False
+        
+        # Record result
+        if upload_id:
+            logger.info(f"Upload successful: {upload_id}")
+            video_registry.record_upload_attempt(
+                video_id, platform, "SUCCESS",
+                platform_post_id=upload_id
+            )
+            audit.log_upload_event(video_id, platform, "success", upload_id)
+            return True
+        else:
+            logger.warning("Upload failed (no ID returned)")
+            retry_count = video_registry.increment_retry_count(video_id, platform)
+            
+            if retry_count >= 3:
+                video_registry.record_upload_attempt(
+                    video_id, platform, "FAILED_FINAL",
+                    error_message="Max retries exceeded",
+                    retry_count=retry_count
+                )
+            else:
+                video_registry.record_upload_attempt(
+                    video_id, platform, "FAILED",
+                    error_message="Upload failed - no ID returned",
+                    retry_count=retry_count
+                )
+            
+            audit.log_upload_event(video_id, platform, "failed")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Upload error: {str(e)}")
+        retry_count = video_registry.increment_retry_count(video_id, platform)
+        
+        if retry_count >= 3:
+            video_registry.record_upload_attempt(
+                video_id, platform, "FAILED_FINAL",
+                error_message=str(e),
+                retry_count=retry_count
+            )
+        else:
+            video_registry.record_upload_attempt(
+                video_id, platform, "FAILED",
+                error_message=str(e),
+                retry_count=retry_count
+            )
+        
+        audit.log_upload_event(video_id, platform, "failed", error_message=str(e))
+        return False
+        
+    finally:
+        if browser_manager:
+            browser_manager.close()
 
 
 def main():
