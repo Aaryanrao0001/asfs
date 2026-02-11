@@ -384,6 +384,11 @@ def get_tiktok_selectors() -> SelectorManager:
     )
     # Add new selectors for current TikTok UI
     caption_group.add_selector(
+        value='div.notranslate.public-DraftEditor-content[contenteditable="true"][role="combobox"]',
+        priority=1,
+        description="DraftJS editor (current TikTok UI as of 2026)"
+    )
+    caption_group.add_selector(
         value='div[contenteditable="plaintext-only"]',
         priority=2,
         description="Contenteditable plaintext-only mode (new TikTok UI pattern)"

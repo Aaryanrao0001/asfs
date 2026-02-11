@@ -411,6 +411,7 @@ def upload_to_tiktok_browser(
         if not caption_group:
             # Legacy fallback
             caption_selectors = [
+                'div.notranslate.public-DraftEditor-content[contenteditable="true"][role="combobox"]',
                 '[data-e2e="caption-input"]',
                 '[data-testid="video-caption"] div[contenteditable="true"]',
                 'div.caption-editor[contenteditable="true"]',
@@ -777,6 +778,7 @@ def _upload_to_tiktok_with_manager(
         if not caption_group:
             # Legacy fallback
             caption_selectors = [
+                'div.notranslate.public-DraftEditor-content[contenteditable="true"][role="combobox"]',
                 '[data-e2e="caption-input"]',
                 '[data-testid="video-caption"] div[contenteditable="true"]',
                 'div.caption-editor[contenteditable="true"]',
