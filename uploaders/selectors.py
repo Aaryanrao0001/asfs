@@ -390,7 +390,7 @@ def get_tiktok_selectors() -> SelectorManager:
     caption_group.add_selector(
         value='div[contenteditable="true"][data-text]',
         priority=2,
-        description="Contenteditable with data-text (React-based UI)"
+        description="Contenteditable with data-text (common React pattern for placeholder text)"
     )
     caption_group.add_selector(
         value='div.caption-editor[contenteditable="true"]',
@@ -405,7 +405,7 @@ def get_tiktok_selectors() -> SelectorManager:
     caption_group.add_selector(
         value='div[contenteditable="true"]',
         priority=4,
-        description="Generic contenteditable (broad fallback for React UI)"
+        description="Generic contenteditable (last resort - may match other inputs, relies on context)"
     )
     manager.add_group(caption_group)
     
