@@ -901,13 +901,29 @@ def upload_to_instagram_browser(
         
         browser.human_delay(2, 3)
         
-        # Click "Share" button with state checking
-        logger.info("Clicking Share button")
-        if not _wait_for_button_enabled(page, "Share", timeout=30000):
-            raise Exception("Share button failed - cannot complete upload")
-        
-        # Wait a moment for submission
-        page.wait_for_timeout(3000)
+        # Use keyboard shortcut to trigger Share button (TAB+TAB+ENTER)
+        # This avoids DOM overlays, spinners, and phantom Share button clones
+        logger.info("Focusing caption input and using TAB+TAB+ENTER to trigger Share")
+        try:
+            # Ensure caption input is focused
+            caption_box.focus()
+            page.wait_for_timeout(500)
+            
+            # Send TAB twice to navigate to Share button
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(300)
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(300)
+            
+            # Send ENTER to trigger upload
+            page.keyboard.press("Enter")
+            logger.info("TAB+TAB+ENTER sent to trigger Share")
+            
+            # Wait for upload transition
+            page.wait_for_timeout(3000)
+        except Exception as e:
+            logger.error(f"Failed to send TAB+TAB+ENTER shortcut: {e}")
+            raise Exception(f"Share button keyboard shortcut failed - cannot complete upload: {e}")
         
         # Be HONEST about what we know
         logger.warning("Instagram upload submitted - no deterministic confirmation available")
@@ -1137,13 +1153,29 @@ def _upload_to_instagram_with_manager(
         
         page.wait_for_timeout(random.randint(6000, 9000))
         
-        # Click "Share" button with state checking
-        logger.info("Clicking Share button")
-        if not _wait_for_button_enabled(page, "Share", timeout=30000):
-            raise Exception("Share button failed - cannot complete upload")
-        
-        # Wait a moment for submission
-        page.wait_for_timeout(3000)
+        # Use keyboard shortcut to trigger Share button (TAB+TAB+ENTER)
+        # This avoids DOM overlays, spinners, and phantom Share button clones
+        logger.info("Focusing caption input and using TAB+TAB+ENTER to trigger Share")
+        try:
+            # Ensure caption input is focused
+            caption_box.focus()
+            page.wait_for_timeout(500)
+            
+            # Send TAB twice to navigate to Share button
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(300)
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(300)
+            
+            # Send ENTER to trigger upload
+            page.keyboard.press("Enter")
+            logger.info("TAB+TAB+ENTER sent to trigger Share")
+            
+            # Wait for upload transition
+            page.wait_for_timeout(3000)
+        except Exception as e:
+            logger.error(f"Failed to send TAB+TAB+ENTER shortcut: {e}")
+            raise Exception(f"Share button keyboard shortcut failed - cannot complete upload: {e}")
         
         # Be HONEST about what we know
         logger.warning("Instagram upload submitted - no deterministic confirmation available")
