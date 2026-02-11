@@ -562,28 +562,18 @@ def upload_to_tiktok_browser(
                 logger.info("Redirected away from upload page - likely successful")
                 success_confirmed = True
             else:
-                # Still on upload page - check for success elements
-                # Note: We cannot reliably detect success if still on /upload
-                # TikTok often stays on upload page after successful post
-                logger.info("Still on upload page - checking for success indicators...")
+                # Still on upload page - TikTok often stays here after successful post
+                # We cannot reliably detect success without redirect
+                logger.info("Still on upload page - success cannot be determined")
+                success_confirmed = False
                 
-                # Try to detect success dialog or confirmation
-                try:
-                    # Wait a bit more and check for any success indicators
-                    page.wait_for_timeout(5000)
-                    
-                    # Check if upload modal/dialog disappeared
-                    # TikTok shows a modal during upload that should disappear
-                    logger.debug("Checking for upload modal state...")
-                    success_confirmed = False
-                except Exception as e:
-                    logger.debug(f"Error checking success indicators: {e}")
-                    success_confirmed = False
+                # Wait for potential processing
+                page.wait_for_timeout(5000)
         except Exception as e:
             logger.warning(f"Error checking success status: {e}")
             success_confirmed = False
         
-        # Apply minimum safety wait (10 seconds total from post click)
+        # Apply minimum safety wait (15 seconds total from post click)
         # to ensure TikTok has time to process the upload
         logger.info("Applying minimum safety wait to ensure upload completion...")
         page.wait_for_timeout(5000)  # Additional 5s to reach 15s total
@@ -955,28 +945,18 @@ def _upload_to_tiktok_with_manager(
                 logger.info("Redirected away from upload page - likely successful")
                 success_confirmed = True
             else:
-                # Still on upload page - check for success elements
-                # Note: We cannot reliably detect success if still on /upload
-                # TikTok often stays on upload page after successful post
-                logger.info("Still on upload page - checking for success indicators...")
+                # Still on upload page - TikTok often stays here after successful post
+                # We cannot reliably detect success without redirect
+                logger.info("Still on upload page - success cannot be determined")
+                success_confirmed = False
                 
-                # Try to detect success dialog or confirmation
-                try:
-                    # Wait a bit more and check for any success indicators
-                    page.wait_for_timeout(5000)
-                    
-                    # Check if upload modal/dialog disappeared
-                    # TikTok shows a modal during upload that should disappear
-                    logger.debug("Checking for upload modal state...")
-                    success_confirmed = False
-                except Exception as e:
-                    logger.debug(f"Error checking success indicators: {e}")
-                    success_confirmed = False
+                # Wait for potential processing
+                page.wait_for_timeout(5000)
         except Exception as e:
             logger.warning(f"Error checking success status: {e}")
             success_confirmed = False
         
-        # Apply minimum safety wait (10 seconds total from post click)
+        # Apply minimum safety wait (15 seconds total from post click)
         # to ensure TikTok has time to process the upload
         logger.info("Applying minimum safety wait to ensure upload completion...")
         page.wait_for_timeout(5000)  # Additional 5s to reach 15s total

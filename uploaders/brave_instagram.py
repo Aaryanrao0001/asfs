@@ -141,7 +141,10 @@ def _wait_for_upload_confirmation(page: Page) -> tuple[bool, str]:
                 
                 if progress_exists:
                     logger.info("Progress indicator detected, waiting for it to disappear...")
-                    page.wait_for_selector(progress_selector, state="hidden", timeout=UPLOAD_CONFIRMATION_WAIT_MS - int((time.time() - start_time) * 1000))
+                    # Calculate remaining timeout, ensure it's positive
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    remaining_timeout = max(1000, UPLOAD_CONFIRMATION_WAIT_MS - elapsed_ms)
+                    page.wait_for_selector(progress_selector, state="hidden", timeout=remaining_timeout)
                     elapsed = time.time() - start_time
                     logger.info(f"Progress indicator disappeared after {elapsed:.1f}s - upload confirmed")
                     confirmed = True
