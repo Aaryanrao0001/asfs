@@ -11,6 +11,7 @@ Generates:
 
 import logging
 import re
+import random
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
@@ -203,7 +204,6 @@ class ViralMetadataGenerator:
             "Tag someone who needs this!"
         ]
         
-        import random
         caption += random.choice(ctas)
         
         return caption
