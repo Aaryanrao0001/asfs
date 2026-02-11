@@ -305,7 +305,7 @@ def upload_to_tiktok_browser(
             selector_value, file_input = try_selectors_with_page(
                 page,
                 file_input_group,
-                timeout=30000,
+                timeout=90000,
                 state="attached"
             )
             
@@ -331,13 +331,14 @@ def upload_to_tiktok_browser(
             logger.warning("Could not confirm processing complete, proceeding anyway...")
         
         # Ensure caption box is visible before typing
+        # Increased timeout by 3x (30s → 90s) for slow networks and React UI rendering
         logger.info("Ensuring caption box is ready...")
         caption_group = _tiktok_selectors.get_group("caption_input")
         if caption_group:
             selector_value, caption_element = try_selectors_with_page(
                 page,
                 caption_group,
-                timeout=30000,
+                timeout=90000,
                 state="visible"
             )
             if not caption_element:
@@ -346,7 +347,7 @@ def upload_to_tiktok_browser(
         else:
             # Legacy check
             try:
-                page.wait_for_selector('div[contenteditable="true"]', timeout=30000, state="visible")
+                page.wait_for_selector('div[contenteditable="true"]', timeout=90000, state="visible")
             except Exception as e:
                 logger.error(f"Caption box not visible: {e}")
                 raise Exception("Caption input not found after upload")
@@ -393,7 +394,7 @@ def upload_to_tiktok_browser(
             selector_value, element = try_selectors_with_page(
                 page,
                 caption_group,
-                timeout=30000,
+                timeout=90000,
                 state="visible"
             )
             
@@ -450,7 +451,7 @@ def upload_to_tiktok_browser(
                     try:
                         post_button = page.wait_for_selector(
                             f'{selector}:not(:has-text("Discard"))',
-                            timeout=30000,
+                            timeout=90000,
                             state="visible"
                         )
                         if post_button:
@@ -470,7 +471,7 @@ def upload_to_tiktok_browser(
                 selector_value, post_button = try_selectors_with_page(
                     page,
                     post_button_group,
-                    timeout=30000,
+                    timeout=90000,
                     state="visible"
                 )
                 
@@ -659,19 +660,19 @@ def _upload_to_tiktok_with_manager(
             # Legacy fallback
             try:
                 file_input_selector = 'input[type="file"]'
-                file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=30000)
+                file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=90000)
                 file_input.set_input_files(video_path)
             except Exception as e:
                 logger.warning(f"Primary file selector failed, trying alternative: {e}")
                 file_input_selector = '[data-e2e="upload-input"]'
-                file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=30000)
+                file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=90000)
                 file_input.set_input_files(video_path)
         else:
             # Use selector intelligence
             selector_value, file_input = try_selectors_with_page(
                 page,
                 file_input_group,
-                timeout=30000,
+                timeout=90000,
                 state="attached"
             )
             
@@ -696,13 +697,14 @@ def _upload_to_tiktok_with_manager(
             logger.warning("Could not confirm processing complete, proceeding anyway...")
         
         # Ensure caption box is visible before typing
+        # Increased timeout by 3x (30s → 90s) for slow networks and React UI rendering
         logger.info("Ensuring caption box is ready...")
         caption_group = _tiktok_selectors.get_group("caption_input")
         if caption_group:
             selector_value, caption_element = try_selectors_with_page(
                 page,
                 caption_group,
-                timeout=30000,
+                timeout=90000,
                 state="visible"
             )
             if not caption_element:
@@ -711,7 +713,7 @@ def _upload_to_tiktok_with_manager(
         else:
             # Legacy check
             try:
-                page.wait_for_selector('div[contenteditable="true"]', timeout=30000, state="visible")
+                page.wait_for_selector('div[contenteditable="true"]', timeout=90000, state="visible")
             except Exception as e:
                 logger.error(f"Caption box not visible: {e}")
                 raise Exception("Caption input not found after upload")
@@ -754,7 +756,7 @@ def _upload_to_tiktok_with_manager(
                 try:
                     caption_selector = 'div[contenteditable="true"]'
                     logger.warning(f"Using generic selector as fallback: {caption_selector}")
-                    element = page.wait_for_selector(caption_selector, timeout=30000)
+                    element = page.wait_for_selector(caption_selector, timeout=90000)
                     element.click()
                     page.keyboard.press("Control+A")
                     page.keyboard.press("Backspace")
@@ -767,7 +769,7 @@ def _upload_to_tiktok_with_manager(
             selector_value, element = try_selectors_with_page(
                 page,
                 caption_group,
-                timeout=30000,
+                timeout=90000,
                 state="visible"
             )
             
@@ -824,7 +826,7 @@ def _upload_to_tiktok_with_manager(
                     try:
                         post_button = page.wait_for_selector(
                             f'{selector}:not(:has-text("Discard"))',
-                            timeout=30000,
+                            timeout=90000,
                             state="visible"
                         )
                         if post_button:
@@ -844,7 +846,7 @@ def _upload_to_tiktok_with_manager(
                 selector_value, post_button = try_selectors_with_page(
                     page,
                     post_button_group,
-                    timeout=30000,
+                    timeout=90000,
                     state="visible"
                 )
                 

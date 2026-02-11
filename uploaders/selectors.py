@@ -383,19 +383,29 @@ def get_tiktok_selectors() -> SelectorManager:
         description="Test ID with contenteditable"
     )
     caption_group.add_selector(
-        value='div.caption-editor[contenteditable="true"]',
-        priority=3,
-        description="Class-based selector"
-    )
-    caption_group.add_selector(
         value='div[contenteditable="true"][aria-label*="caption" i]',
         priority=2,
         description="ARIA label with contenteditable"
     )
     caption_group.add_selector(
+        value='div[contenteditable="true"][data-text]',
+        priority=2,
+        description="Contenteditable with data-text (common React pattern for placeholder text)"
+    )
+    caption_group.add_selector(
+        value='div.caption-editor[contenteditable="true"]',
+        priority=3,
+        description="Class-based selector"
+    )
+    caption_group.add_selector(
         value='div[contenteditable="true"][placeholder*="caption" i]',
         priority=3,
         description="Placeholder-based"
+    )
+    caption_group.add_selector(
+        value='div[contenteditable="true"]',
+        priority=4,
+        description="Generic contenteditable (last resort - may match other inputs, relies on context)"
     )
     manager.add_group(caption_group)
     
