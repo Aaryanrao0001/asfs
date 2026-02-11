@@ -34,7 +34,14 @@ INSTAGRAM_CREATE_SELECTORS = [
 ]
 INSTAGRAM_CREATE_SELECTOR = INSTAGRAM_CREATE_SELECTORS[0]
 
-# Share button click enhancement timeouts (in milliseconds)
+# Share button keyboard navigation timeouts (in milliseconds)
+# These control the TAB+TAB+ENTER keyboard shortcut approach
+KEYBOARD_FOCUS_WAIT_MS = 500   # Wait after focusing caption input
+KEYBOARD_TAB_WAIT_MS = 300     # Wait between TAB key presses
+KEYBOARD_SUBMIT_WAIT_MS = 3000 # Wait after pressing ENTER to trigger upload
+
+# Legacy Share button click enhancement timeouts (in milliseconds)
+# These are kept for backwards compatibility with Next button logic
 OVERLAY_CLEAR_WAIT_MS = 2000  # Wait time after detecting overlay
 SHARE_RETRY_WAIT_MS = 1000    # Wait time before retry click
 SHARE_DISAPPEAR_TIMEOUT_MS = 5000  # Timeout for Share button to disappear
@@ -571,6 +578,48 @@ def _find_caption_input(page: Page):
     return None
 
 
+def _trigger_share_with_keyboard(page: Page, caption_box) -> None:
+    """
+    Trigger Instagram Share button using keyboard navigation (TAB+TAB+ENTER).
+    
+    This approach avoids DOM overlays, spinners, and phantom Share button clones
+    that cause traditional click-based automation to fail.
+    
+    IMPORTANT: This assumes Instagram's UI tab order places the Share button
+    exactly 2 TAB presses away from the caption input. If Instagram changes
+    their UI layout or tab order, this may need adjustment.
+    
+    Args:
+        page: Playwright Page object
+        caption_box: Caption input element (must be already found and filled)
+        
+    Raises:
+        Exception: If keyboard shortcut fails
+    """
+    logger.info("Focusing caption input and using TAB+TAB+ENTER to trigger Share")
+    try:
+        # Ensure caption input is focused
+        caption_box.focus()
+        page.wait_for_timeout(KEYBOARD_FOCUS_WAIT_MS)
+        
+        # Send TAB twice to navigate to Share button
+        # Based on Instagram's current UI tab order (as of 2025)
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(KEYBOARD_TAB_WAIT_MS)
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(KEYBOARD_TAB_WAIT_MS)
+        
+        # Send ENTER to trigger upload
+        page.keyboard.press("Enter")
+        logger.info("TAB+TAB+ENTER sent to trigger Share")
+        
+        # Wait for upload transition
+        page.wait_for_timeout(KEYBOARD_SUBMIT_WAIT_MS)
+    except Exception as e:
+        logger.error(f"Failed to send TAB+TAB+ENTER shortcut: {e}")
+        raise Exception(f"Share button keyboard shortcut failed - cannot complete upload: {e}")
+
+
 def _select_post_option(page: Page, timeout: int = 45000) -> bool:
     """
     Click the Post/Create option after opening Create menu.
@@ -901,13 +950,8 @@ def upload_to_instagram_browser(
         
         browser.human_delay(2, 3)
         
-        # Click "Share" button with state checking
-        logger.info("Clicking Share button")
-        if not _wait_for_button_enabled(page, "Share", timeout=30000):
-            raise Exception("Share button failed - cannot complete upload")
-        
-        # Wait a moment for submission
-        page.wait_for_timeout(3000)
+        # Use keyboard shortcut to trigger Share button
+        _trigger_share_with_keyboard(page, caption_box)
         
         # Be HONEST about what we know
         logger.warning("Instagram upload submitted - no deterministic confirmation available")
@@ -1137,13 +1181,8 @@ def _upload_to_instagram_with_manager(
         
         page.wait_for_timeout(random.randint(6000, 9000))
         
-        # Click "Share" button with state checking
-        logger.info("Clicking Share button")
-        if not _wait_for_button_enabled(page, "Share", timeout=30000):
-            raise Exception("Share button failed - cannot complete upload")
-        
-        # Wait a moment for submission
-        page.wait_for_timeout(3000)
+        # Use keyboard shortcut to trigger Share button
+        _trigger_share_with_keyboard(page, caption_box)
         
         # Be HONEST about what we know
         logger.warning("Instagram upload submitted - no deterministic confirmation available")
