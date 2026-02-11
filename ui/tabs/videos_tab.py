@@ -14,7 +14,7 @@ from PySide6.QtCore import Signal, Qt, QTimer
 from PySide6.QtGui import QPixmap, QIcon
 
 from database import VideoRegistry
-from pipeline import run_upload_stage
+from ..workers.upload_worker import UploadWorker, BulkUploadWorker
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class VideosTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.video_registry = VideoRegistry()
+        self.upload_workers = []  # Track active upload workers
         self.init_ui()
         
         # Auto-refresh timer
@@ -283,7 +284,7 @@ class VideosTab(QWidget):
     
     def upload_to_platform(self, video_id: str, platform: str):
         """
-        Upload a video to a specific platform.
+        Upload a video to a specific platform using background worker.
         
         Args:
             video_id: Video identifier
@@ -325,36 +326,66 @@ class VideosTab(QWidget):
         )
         
         if reply == QMessageBox.Yes:
-            # Execute upload in background (simplified for now - should use worker thread)
-            try:
-                success = run_upload_stage(video_id, platform)
-                
-                if success:
-                    QMessageBox.information(
-                        self,
-                        "Upload Successful",
-                        f"Video uploaded to {platform} successfully!"
-                    )
-                else:
-                    QMessageBox.warning(
-                        self,
-                        "Upload Failed",
-                        f"Failed to upload video to {platform}. Check logs for details."
-                    )
-                
-                # Refresh to show updated status
-                self.refresh_videos()
-                
-            except Exception as e:
-                logger.error(f"Upload error: {e}")
-                QMessageBox.critical(
-                    self,
-                    "Upload Error",
-                    f"An error occurred during upload:\n{e}"
-                )
+            # Execute upload in background worker thread
+            worker = UploadWorker(video_id, platform)
+            worker.upload_started.connect(self.on_upload_started)
+            worker.upload_finished.connect(self.on_upload_finished)
+            worker.upload_error.connect(self.on_upload_error)
+            
+            # Keep reference to prevent garbage collection
+            self.upload_workers.append(worker)
+            
+            # Start worker
+            worker.start()
+            logger.info(f"Started upload worker: {video_id} to {platform}")
+    
+    def on_upload_started(self, video_id: str, platform: str):
+        """Handle upload start."""
+        logger.info(f"Upload started: {video_id} to {platform}")
+        # Could show progress indicator here
+    
+    def on_upload_finished(self, video_id: str, platform: str, success: bool):
+        """Handle upload completion."""
+        # Clean up worker
+        sender = self.sender()
+        if sender in self.upload_workers:
+            self.upload_workers.remove(sender)
+        
+        # Show result
+        if success:
+            QMessageBox.information(
+                self,
+                "Upload Successful",
+                f"Video {video_id} uploaded to {platform} successfully!"
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "Upload Failed",
+                f"Failed to upload {video_id} to {platform}. Check logs for details."
+            )
+        
+        # Refresh to show updated status
+        self.refresh_videos()
+    
+    def on_upload_error(self, video_id: str, platform: str, error_msg: str):
+        """Handle upload error."""
+        # Clean up worker
+        sender = self.sender()
+        if sender in self.upload_workers:
+            self.upload_workers.remove(sender)
+        
+        QMessageBox.critical(
+            self,
+            "Upload Error",
+            f"An error occurred uploading {video_id} to {platform}:\n{error_msg}"
+        )
+        
+        # Refresh to show updated status
+        self.refresh_videos()
     
     def upload_all_pending(self):
-        """Upload all videos with pending uploads to all platforms."""
+        """Upload all videos with pending uploads to all platforms using background worker."""
         reply = QMessageBox.question(
             self,
             "Confirm Bulk Upload",
@@ -367,7 +398,8 @@ class VideosTab(QWidget):
             videos = self.video_registry.get_all_videos()
             platforms = ["Instagram", "TikTok", "YouTube"]
             
-            upload_count = 0
+            # Collect upload tasks
+            upload_tasks = []
             
             for video in videos:
                 video_id = video['id']
@@ -380,17 +412,49 @@ class VideosTab(QWidget):
                         can_upload, reason = self.video_registry.can_upload(video_id, platform)
                         
                         if can_upload:
-                            try:
-                                success = run_upload_stage(video_id, platform)
-                                if success:
-                                    upload_count += 1
-                            except Exception as e:
-                                logger.error(f"Failed to upload {video_id} to {platform}: {e}")
+                            upload_tasks.append((video_id, platform, {}))
             
-            QMessageBox.information(
-                self,
-                "Bulk Upload Complete",
-                f"Uploaded {upload_count} videos"
-            )
+            if not upload_tasks:
+                QMessageBox.information(
+                    self,
+                    "No Uploads Needed",
+                    "All videos are already uploaded to all platforms."
+                )
+                return
             
-            self.refresh_videos()
+            # Execute bulk upload in background worker
+            worker = BulkUploadWorker(upload_tasks)
+            worker.upload_started.connect(self.on_bulk_upload_started)
+            worker.upload_finished.connect(self.on_bulk_upload_progress)
+            worker.all_uploads_finished.connect(self.on_bulk_upload_complete)
+            
+            # Keep reference
+            self.upload_workers.append(worker)
+            
+            # Start worker
+            worker.start()
+            logger.info(f"Started bulk upload: {len(upload_tasks)} tasks")
+    
+    def on_bulk_upload_started(self, video_id: str, platform: str):
+        """Handle bulk upload task start."""
+        logger.info(f"Bulk upload progress: {video_id} to {platform}")
+    
+    def on_bulk_upload_progress(self, video_id: str, platform: str, success: bool):
+        """Handle individual upload completion in bulk operation."""
+        # Refresh to show updated status
+        self.refresh_videos()
+    
+    def on_bulk_upload_complete(self, successful: int, failed: int):
+        """Handle bulk upload completion."""
+        # Clean up worker
+        sender = self.sender()
+        if sender in self.upload_workers:
+            self.upload_workers.remove(sender)
+        
+        QMessageBox.information(
+            self,
+            "Bulk Upload Complete",
+            f"Uploaded {successful} videos successfully\n{failed} failed"
+        )
+        
+        self.refresh_videos()

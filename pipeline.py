@@ -38,7 +38,6 @@ import logging
 import json
 import yaml
 import argparse
-import sqlite3
 from pathlib import Path
 from typing import Dict, List
 from dotenv import load_dotenv
@@ -865,12 +864,7 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
         return False
     
     # Get video info from registry
-    conn = sqlite3.connect(video_registry.db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM videos WHERE id = ?', (video_id,))
-    video = cursor.fetchone()
-    conn.close()
+    video = video_registry.get_video(video_id)
     
     if not video:
         logger.error(f"Video {video_id} not found in registry")

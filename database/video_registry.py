@@ -406,9 +406,31 @@ class VideoRegistry:
         finally:
             conn.close()
     
+    def get_video(self, video_id: str) -> Optional[Dict]:
+        """
+        Get video information by ID.
+        
+        Args:
+            video_id: Video identifier
+            
+        Returns:
+            Video dictionary or None if not found
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM videos WHERE id = ?', (video_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return dict(row)
+        return None
+    
     def increment_retry_count(self, video_id: str, platform: str) -> int:
         """
-        Increment retry count for a video upload.
+        Increment retry count for a video upload atomically.
         
         Args:
             video_id: Video identifier
@@ -421,26 +443,31 @@ class VideoRegistry:
         cursor = conn.cursor()
         
         try:
+            # Atomic increment using single UPDATE statement
+            cursor.execute('''
+                UPDATE video_uploads
+                SET retry_count = retry_count + 1
+                WHERE video_id = ? AND platform = ?
+            ''', (video_id, platform))
+            
+            if cursor.rowcount == 0:
+                logger.warning(f"Upload record not found: {video_id} on {platform}")
+                return -1
+            
+            # Get the new count
             cursor.execute('''
                 SELECT retry_count FROM video_uploads
                 WHERE video_id = ? AND platform = ?
             ''', (video_id, platform))
             
             row = cursor.fetchone()
+            conn.commit()
             
             if row:
-                new_count = row[0] + 1
-                cursor.execute('''
-                    UPDATE video_uploads
-                    SET retry_count = ?
-                    WHERE video_id = ? AND platform = ?
-                ''', (new_count, video_id, platform))
-                
-                conn.commit()
+                new_count = row[0]
                 logger.debug(f"Retry count incremented to {new_count} for {video_id} on {platform}")
                 return new_count
             else:
-                logger.warning(f"Upload record not found: {video_id} on {platform}")
                 return -1
                 
         except Exception as e:
