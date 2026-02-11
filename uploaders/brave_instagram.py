@@ -40,6 +40,12 @@ KEYBOARD_FOCUS_WAIT_MS = 500   # Wait after focusing caption input
 KEYBOARD_TAB_WAIT_MS = 300     # Wait between TAB key presses
 KEYBOARD_SUBMIT_WAIT_MS = 3000 # Wait after pressing ENTER to trigger upload
 
+# Upload confirmation timeouts (in milliseconds)
+# These control how long we wait for Instagram to confirm upload
+UPLOAD_CONFIRMATION_WAIT_MS = 15000  # Wait for dialog disappearance or progress indicators
+UPLOAD_CONFIRMATION_CHECK_INTERVAL_MS = 1000  # Check every 1 second
+UPLOAD_MIN_SAFETY_WAIT_MS = 10000  # Minimum wait before closing (to ensure IG processes upload)
+
 # Legacy button click enhancement timeouts (in milliseconds)
 # These are kept for backwards compatibility with Next button logic
 OVERLAY_CLEAR_WAIT_MS = 2000  # Wait time after detecting overlay
@@ -70,6 +76,102 @@ def _try_js_click(button, button_text: str = "button") -> bool:
     except Exception as e:
         logger.debug(f"JS click failed for {button_text}: {e}")
         return False
+
+
+def _wait_for_upload_confirmation(page: Page) -> tuple[bool, str]:
+    """
+    Wait for Instagram upload confirmation after submitting.
+    
+    This function waits for upload dialog/modal to disappear or for upload
+    progress indicators to complete. It prevents the race condition where
+    closing the browser too early causes Instagram to discard the upload.
+    
+    Strategy:
+    1. Wait for upload dialog (aria-hidden="false") to disappear/become hidden
+    2. Wait for progress indicators (progressbar) to disappear
+    3. Apply minimum safety wait (10s) even if confirmation is ambiguous
+    4. Maximum wait: 15 seconds total
+    
+    Args:
+        page: Playwright Page object
+        
+    Returns:
+        Tuple of (confirmed: bool, message: str)
+        - confirmed: True if upload confirmed, False if timeout/ambiguous
+        - message: Description of what was detected
+    """
+    import time
+    
+    logger.info("Waiting for Instagram upload confirmation...")
+    start_time = time.time()
+    confirmed = False
+    message = "Upload confirmation ambiguous"
+    
+    try:
+        # Check for upload dialog disappearing (most reliable indicator)
+        try:
+            # Wait for the upload dialog container to disappear or become hidden
+            # Instagram uses div[aria-hidden="false"] for active dialogs
+            dialog_selector = 'div[aria-hidden="false"]'
+            
+            # First, check if dialog exists
+            dialog_exists = page.locator(dialog_selector).count() > 0
+            
+            if dialog_exists:
+                logger.info("Upload dialog detected, waiting for it to disappear...")
+                # Wait for dialog to disappear (state="hidden" or element detached)
+                page.wait_for_selector(dialog_selector, state="hidden", timeout=UPLOAD_CONFIRMATION_WAIT_MS)
+                elapsed = time.time() - start_time
+                logger.info(f"Upload dialog disappeared after {elapsed:.1f}s - upload confirmed")
+                confirmed = True
+                message = f"Instagram upload confirmed (dialog disappeared after {elapsed:.1f}s)"
+            else:
+                logger.debug("No upload dialog detected")
+        except PlaywrightTimeoutError:
+            elapsed = time.time() - start_time
+            logger.warning(f"Dialog did not disappear within {elapsed:.1f}s timeout")
+        except Exception as e:
+            logger.debug(f"Error checking dialog: {e}")
+        
+        # Check for progress indicators disappearing
+        if not confirmed:
+            try:
+                progress_selector = 'div[role="progressbar"]'
+                progress_exists = page.locator(progress_selector).count() > 0
+                
+                if progress_exists:
+                    logger.info("Progress indicator detected, waiting for it to disappear...")
+                    page.wait_for_selector(progress_selector, state="hidden", timeout=UPLOAD_CONFIRMATION_WAIT_MS - int((time.time() - start_time) * 1000))
+                    elapsed = time.time() - start_time
+                    logger.info(f"Progress indicator disappeared after {elapsed:.1f}s - upload confirmed")
+                    confirmed = True
+                    message = f"Instagram upload confirmed (progress completed after {elapsed:.1f}s)"
+                else:
+                    logger.debug("No progress indicator detected")
+            except PlaywrightTimeoutError:
+                elapsed = time.time() - start_time
+                logger.warning(f"Progress indicator did not disappear within {elapsed:.1f}s")
+            except Exception as e:
+                logger.debug(f"Error checking progress: {e}")
+    
+    except Exception as e:
+        logger.warning(f"Error during confirmation wait: {e}")
+    
+    # Apply minimum safety wait if not already exceeded
+    elapsed_ms = int((time.time() - start_time) * 1000)
+    remaining_wait = UPLOAD_MIN_SAFETY_WAIT_MS - elapsed_ms
+    
+    if remaining_wait > 0:
+        logger.info(f"Applying minimum safety wait: {remaining_wait}ms (total: {UPLOAD_MIN_SAFETY_WAIT_MS}ms)")
+        page.wait_for_timeout(remaining_wait)
+    
+    total_elapsed = time.time() - start_time
+    
+    if not confirmed:
+        logger.warning(f"No deterministic confirmation after {total_elapsed:.1f}s wait, but minimum safety delay applied")
+        message = f"Instagram upload submitted (status unverified, waited {total_elapsed:.1f}s for safety)"
+    
+    return confirmed, message
 
 
 def _wait_for_button_enabled(page: Page, button_text: str, timeout: int = 90000) -> bool:
@@ -767,9 +869,14 @@ def upload_to_instagram_browser(
         # Use keyboard shortcut to trigger Share button
         _trigger_share_with_keyboard(page, caption_box)
         
-        # Be HONEST about what we know
-        logger.warning("Instagram upload submitted - no deterministic confirmation available")
-        result = "Instagram upload submitted (status unverified)"
+        # CRITICAL: Wait for upload confirmation before closing browser
+        # This prevents race condition where IG discards upload when browser closes too early
+        confirmed, result = _wait_for_upload_confirmation(page)
+        
+        if confirmed:
+            logger.info("Instagram upload confirmed successfully")
+        else:
+            logger.warning("Instagram upload status unverified, but safety wait completed")
         
         browser.human_delay(2, 3)
         browser.close()
@@ -998,9 +1105,14 @@ def _upload_to_instagram_with_manager(
         # Use keyboard shortcut to trigger Share button
         _trigger_share_with_keyboard(page, caption_box)
         
-        # Be HONEST about what we know
-        logger.warning("Instagram upload submitted - no deterministic confirmation available")
-        result = "Instagram upload submitted (status unverified)"
+        # CRITICAL: Wait for upload confirmation before closing browser
+        # This prevents race condition where IG discards upload when browser closes too early
+        confirmed, result = _wait_for_upload_confirmation(page)
+        
+        if confirmed:
+            logger.info("Instagram upload confirmed successfully")
+        else:
+            logger.warning("Instagram upload status unverified, but safety wait completed")
         
         # Navigate to about:blank for next uploader
         manager.navigate_to_blank(page)
