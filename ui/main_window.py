@@ -72,9 +72,20 @@ class MainWindow(QMainWindow):
         self.pipeline_worker.error_occurred.connect(self.on_pipeline_error)
         
         # Initialize scheduler
-        from scheduler.auto_scheduler import get_scheduler
-        self.scheduler = get_scheduler()
-        self.scheduler.set_upload_callback(self.execute_scheduled_upload)
+        try:
+            from scheduler.auto_scheduler import get_scheduler
+            self.scheduler = get_scheduler()
+            self.scheduler.set_upload_callback(self.execute_scheduled_upload)
+            logger.info("Scheduler initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize scheduler: {e}")
+            # Create a dummy scheduler that does nothing
+            class DummyScheduler:
+                def configure(self, **kwargs): pass
+                def is_running(self): return False
+                def start(self): logger.warning("Scheduler not available")
+                def stop(self): pass
+            self.scheduler = DummyScheduler()
     
     def connect_signals(self):
         """Connect all UI signals to handlers."""

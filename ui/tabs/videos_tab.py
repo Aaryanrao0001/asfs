@@ -139,6 +139,10 @@ class VideosTab(QWidget):
                     video_id = Path(video_path).stem
                     
                     # Register video
+                    # Note: Checksum calculation is skipped for performance reasons.
+                    # This means duplicate files won't be detected based on content,
+                    # only by video_id (filename). For large video libraries where
+                    # content-based deduplication is needed, set calculate_checksum=True.
                     success = self.video_registry.register_video(
                         video_id=video_id,
                         file_path=video_path,
@@ -192,7 +196,7 @@ class VideosTab(QWidget):
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=30  # Increased timeout for large files
             )
             
             if result.returncode == 0 and result.stdout.strip():

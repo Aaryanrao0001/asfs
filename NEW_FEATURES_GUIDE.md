@@ -255,11 +255,11 @@ In **Tab 4: Upload Platforms** → **Auto-Schedule & Background Upload**:
 
 ### Important Notes
 
-- **App Must Run**: Scheduler requires app to be running
+- **App Must Run**: Scheduler requires app to be running (background operation)
 - **Duplicate Settings**: Respects "Allow Duplicates" per video
 - **Manual Override**: Can still upload manually anytime
 - **Stop/Start**: Disable checkbox to stop, re-enable to restart
-- **Persistence**: Scheduler state survives across sessions (planned feature)
+- **State Persistence**: Scheduler state is NOT currently persisted across app restarts (future enhancement)
 
 ---
 

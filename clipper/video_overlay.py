@@ -35,6 +35,50 @@ def get_hook_position_coordinates(position: str, video_width: int = 1080, video_
     return positions.get(position, positions["Top Left"])
 
 
+def get_system_font_path() -> str:
+    """
+    Get system font path for drawtext filter, with fallbacks for different OS.
+    
+    Returns:
+        Path to a suitable font file, or empty string if none found
+    """
+    import sys
+    import os
+    
+    # Try common font paths by OS
+    if sys.platform == "win32":
+        # Windows fonts
+        candidates = [
+            "C:/Windows/Fonts/arial.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
+            "C:/Windows/Fonts/verdana.ttf"
+        ]
+    elif sys.platform == "darwin":
+        # macOS fonts
+        candidates = [
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/Library/Fonts/Arial.ttf",
+            "/System/Library/Fonts/SFNSDisplay.ttf"
+        ]
+    else:
+        # Linux fonts
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"
+        ]
+    
+    # Find first available font
+    for font_path in candidates:
+        if os.path.exists(font_path):
+            return font_path
+    
+    # No font found - FFmpeg will use default
+    logger.warning("No suitable font found, FFmpeg will use default font")
+    return ""
+
+
 def apply_video_overlays(
     input_video: str,
     output_video: str,
@@ -84,6 +128,9 @@ def apply_video_overlays(
             # Escape special characters for FFmpeg
             escaped_text = hook_phrase.replace("'", "\\'").replace(":", "\\:")
             
+            # Get system-appropriate font path
+            font_path = get_system_font_path()
+            
             # Build drawtext filter
             # Use bold font, white text with black shadow for readability
             text_filter = (
@@ -93,8 +140,11 @@ def apply_video_overlays(
                 f":fontcolor=white"
                 f":borderw=3"
                 f":bordercolor=black"
-                f":fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
             )
+            
+            # Add font path if available
+            if font_path:
+                text_filter += f":fontfile={font_path}"
             
             if filter_complex_parts:
                 # Chain with previous filter
@@ -136,12 +186,19 @@ def apply_video_overlays(
         logger.info(f"Applying overlays: {input_video} -> {output_video}")
         logger.debug(f"FFmpeg command: {' '.join(cmd)}")
         
+        # Calculate timeout based on video size (minimum 5 minutes, add 1 min per 100MB)
+        try:
+            video_size_mb = os.path.getsize(input_video) / (1024 * 1024)
+            timeout = max(300, 300 + int(video_size_mb / 100) * 60)  # 5min + 1min per 100MB
+        except:
+            timeout = 300
+        
         # Execute FFmpeg
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=300  # 5 minute timeout
+            timeout=timeout
         )
         
         if result.returncode != 0:

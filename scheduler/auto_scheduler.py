@@ -94,13 +94,19 @@ class UploadScheduler:
         logger.info("Upload scheduler started")
     
     def stop(self):
-        """Stop the scheduler."""
+        """Stop the scheduler gracefully."""
         if not self.running:
             return
         
+        logger.info("Stopping scheduler gracefully...")
         self.running = False
+        
         if self.thread:
-            self.thread.join(timeout=5)
+            # Give thread time to finish current operation
+            self.thread.join(timeout=10)
+            
+            if self.thread.is_alive():
+                logger.warning("Scheduler thread did not stop within timeout")
         
         logger.info("Upload scheduler stopped")
     
