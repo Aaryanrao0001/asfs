@@ -52,6 +52,7 @@ pipeline_status = {
     'video_path': None,
     'output_dir': None
 }
+pipeline_status_lock = threading.Lock()  # Thread-safe access to pipeline_status
 log_queue = queue.Queue()
 stop_pipeline_flag = threading.Event()
 
@@ -123,10 +124,11 @@ def run_pipeline_thread(video_path: str, output_dir: str, use_cache: bool = True
     global pipeline_status
     
     try:
-        pipeline_status['running'] = True
-        pipeline_status['stage'] = 'starting'
-        pipeline_status['video_path'] = video_path
-        pipeline_status['output_dir'] = output_dir
+        with pipeline_status_lock:
+            pipeline_status['running'] = True
+            pipeline_status['stage'] = 'starting'
+            pipeline_status['video_path'] = video_path
+            pipeline_status['output_dir'] = output_dir
         
         logger.info("=" * 80)
         logger.info("STARTING PIPELINE")
@@ -146,18 +148,22 @@ def run_pipeline_thread(video_path: str, output_dir: str, use_cache: bool = True
             logger.info("\n" + "=" * 80)
             logger.info("PIPELINE COMPLETED SUCCESSFULLY")
             logger.info("=" * 80)
-            pipeline_status['stage'] = 'completed'
+            with pipeline_status_lock:
+                pipeline_status['stage'] = 'completed'
         else:
             logger.info("\n" + "=" * 80)
             logger.info("PIPELINE STOPPED BY USER")
             logger.info("=" * 80)
-            pipeline_status['stage'] = 'stopped'
+            with pipeline_status_lock:
+                pipeline_status['stage'] = 'stopped'
             
     except Exception as e:
         logger.error(f"Pipeline error: {str(e)}")
-        pipeline_status['stage'] = 'error'
+        with pipeline_status_lock:
+            pipeline_status['stage'] = 'error'
     finally:
-        pipeline_status['running'] = False
+        with pipeline_status_lock:
+            pipeline_status['running'] = False
         stop_pipeline_flag.clear()
 
 
@@ -185,8 +191,9 @@ def start_pipeline():
     """Start the video processing pipeline."""
     global pipeline_thread, pipeline_status
     
-    if pipeline_status['running']:
-        return jsonify({'error': 'Pipeline is already running'}), 400
+    with pipeline_status_lock:
+        if pipeline_status['running']:
+            return jsonify({'error': 'Pipeline is already running'}), 400
     
     data = request.json
     video_path = data.get('video_path')
@@ -205,10 +212,13 @@ def start_pipeline():
     pipeline_thread.daemon = True
     pipeline_thread.start()
     
+    with pipeline_status_lock:
+        status_copy = pipeline_status.copy()
+    
     return jsonify({
         'success': True,
         'message': 'Pipeline started',
-        'status': pipeline_status
+        'status': status_copy
     })
 
 
@@ -217,11 +227,12 @@ def stop_pipeline():
     """Stop the running pipeline."""
     global pipeline_status
     
-    if not pipeline_status['running']:
-        return jsonify({'error': 'No pipeline is running'}), 400
+    with pipeline_status_lock:
+        if not pipeline_status['running']:
+            return jsonify({'error': 'No pipeline is running'}), 400
+        pipeline_status['stage'] = 'stopping'
     
     stop_pipeline_flag.set()
-    pipeline_status['stage'] = 'stopping'
     
     return jsonify({
         'success': True,
@@ -232,7 +243,9 @@ def stop_pipeline():
 @app.route('/api/pipeline/status', methods=['GET'])
 def get_pipeline_status():
     """Get current pipeline status."""
-    return jsonify(pipeline_status)
+    with pipeline_status_lock:
+        status_copy = pipeline_status.copy()
+    return jsonify(status_copy)
 
 
 @app.route('/api/pipeline/logs', methods=['GET'])
@@ -459,4 +472,8 @@ def run_server(host='127.0.0.1', port=5000, debug=False, open_browser=True):
 
 
 if __name__ == '__main__':
-    run_server(debug=True)
+    # Note: Do not use debug=True in production
+    # For development only
+    import os
+    is_dev = os.environ.get('FLASK_ENV') == 'development'
+    run_server(debug=is_dev)
