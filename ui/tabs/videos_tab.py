@@ -223,9 +223,15 @@ class VideosTab(QWidget):
             video_path: Path to video file
             
         Returns:
-            Duration in seconds
+            Duration in seconds, or 0.0 if ffprobe is not available
         """
         try:
+            # Check if ffprobe is available
+            import shutil
+            if not shutil.which('ffprobe'):
+                logger.warning("ffprobe not found - cannot determine video duration")
+                return 0.0
+            
             cmd = [
                 'ffprobe',
                 '-v', 'error',
@@ -244,9 +250,15 @@ class VideosTab(QWidget):
             if result.returncode == 0 and result.stdout.strip():
                 return float(result.stdout.strip())
             else:
-                logger.warning(f"Could not get duration for {video_path}")
+                logger.warning(f"Could not get duration for {video_path}: {result.stderr}")
                 return 0.0
                 
+        except FileNotFoundError:
+            logger.error("ffprobe not found in system PATH - please install FFmpeg")
+            return 0.0
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout getting duration for {video_path}")
+            return 0.0
         except Exception as e:
             logger.error(f"Error getting video duration: {e}")
             return 0.0
