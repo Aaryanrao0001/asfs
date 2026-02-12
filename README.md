@@ -1,15 +1,24 @@
 # 🎬 ASFS - Automated Short-Form Content System
 
-A **fully automated desktop application** that transforms long-form videos into viral-worthy short clips optimized for TikTok, Instagram Reels, and YouTube Shorts.
+A **fully automated web application** that transforms long-form videos into viral-worthy short clips optimized for TikTok, Instagram Reels, and YouTube Shorts.
 
 ## ✨ What's New in v2.0
 
-**🖥️ Desktop UI Application**
-- Modern PySide6 (Qt) graphical interface with dark theme
-- Browser-based uploads (no API tokens required!)
-- Built-in Ollama LLM controls
-- Real-time pipeline monitoring
-- Single `.exe` distribution (Windows-first)
+**🌐 Web-Based UI with VaultMatrix Design**
+- Modern React 18+ web interface with cybersecurity aesthetic
+- Flask REST API backend for seamless integration
+- Glassmorphism design with premium green accents
+- Real-time pipeline monitoring with live log streaming
+- Responsive design for desktop, tablet, and mobile
+- No desktop installation required - runs in browser
+
+**🖥️ Redesigned Architecture**
+- React frontend with component-based architecture
+- Flask backend serving REST API endpoints
+- Server-Sent Events (SSE) for live log streaming
+- Persistent settings management
+- Video registry with upload tracking
+- Cross-platform compatibility (Windows, macOS, Linux)
 
 **🌐 Browser Automation**
 - Upload via Brave browser automation (Playwright)
@@ -17,13 +26,13 @@ A **fully automated desktop application** that transforms long-form videos into 
 - No API credentials needed for uploads
 - Human-like delays to avoid detection
 
-**🤖 Local AI Inference**
-- Full Ollama integration with UI controls
-- Start/stop server from the app
-- One-click model downloads
-- Offline-capable AI scoring
+**🤖 AI Model Integration**
+- GitHub Models API integration (gpt-4o, gpt-4o-mini)
+- Configurable scoring thresholds
+- Multi-factor virality analysis
+- Segment-based clip extraction
 
-**🧠 Enhanced Viral Detection (NEW)**
+**🧠 Enhanced Viral Detection**
 - Multi-layer viral clip detection with psychological scoring
 - Emotion analysis using VADER + NRC emotion lexicons
 - Hook quality enforcement (first 7 seconds analysis)
@@ -42,18 +51,19 @@ This system intelligently:
 - **Extracts** platform-optimized short videos (9:16 aspect ratio)
 - **Generates** captions and hashtags
 - **Uploads** to TikTok, Instagram Reels, and YouTube Shorts via browser automation
-- **Provides** a beautiful desktop UI for the entire workflow
+- **Provides** a beautiful web UI for the entire workflow
 
 **This is a real production system** — fully implemented, no placeholders, no mock data.
 
 ---
 
-## 🚀 Quick Start (Desktop UI)
+## 🚀 Quick Start (Web UI)
 
 ### Prerequisites
 
 1. **Python 3.8+** installed
-2. **FFmpeg** - Must be installed and available in PATH
+2. **Node.js 16+** and npm (for frontend development)
+3. **FFmpeg** - Must be installed and available in PATH
    ```bash
    # Ubuntu/Debian
    sudo apt-get install ffmpeg
@@ -65,19 +75,15 @@ This system intelligently:
    # Download from https://ffmpeg.org/download.html
    ```
 
-3. **Brave Browser** (recommended for uploads)
+4. **Brave Browser** (recommended for uploads)
    - Download: https://brave.com/download/
    - Or configure path to any Chromium browser
-
-4. **Ollama** (optional, for local AI)
-   - Download: https://ollama.ai/download/
-   - Provides free, offline AI inference
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Aaryanrao0001/asfs.git
+   git clone https://github.com/Goutamdhanani/asfs.git
    cd asfs
    ```
 
@@ -91,94 +97,117 @@ This system intelligently:
    playwright install chromium
    ```
 
-### Running the Desktop App
+4. **Build the frontend** (for production deployment)
+   ```bash
+   cd web/frontend
+   npm install
+   npm run build
+   cd ../..
+   ```
 
-**Launch the GUI** (default):
+### Running the Web Application
+
+**Launch the web UI** (default):
 ```bash
 python main.py
+# or explicitly:
+python main.py --web
 ```
 
-The desktop application will open with 5 tabs:
-1. **📹 Input Video** - Select your video file
-2. **🤖 AI / Model** - Control Ollama and AI settings
-3. **📝 Metadata** - Configure titles, descriptions, tags
+The server will start at `http://localhost:5000` and automatically open in your browser.
+
+**Custom port/host**:
+```bash
+python main.py --web --port 8080 --host 0.0.0.0
+```
+
+**Without auto-opening browser**:
+```bash
+python main.py --web --no-browser
+```
+
+The web application has 6 tabs:
+1. **📹 Input** - Select video file(s) and configure output
+2. **🤖 AI** - Configure AI model and scoring settings
+3. **📝 Metadata** - Set titles, descriptions, tags, captions
 4. **🚀 Upload** - Select platforms and browser settings
-5. **▶️ Run & Monitor** - Execute pipeline and view live logs
+5. **📊 Videos** - View video registry and upload status
+6. **▶️ Run** - Execute pipeline and monitor live logs
 
 ### First-Time Setup
 
-1. **AI Configuration (Tab 2)**:
-   - Option A: Install Ollama for free local AI
-     - Click "Start Ollama" → "Load Model" (qwen2.5:3b-instruct)
-   - Option B: Use GitHub Models API
-     - Set `GITHUB_TOKEN` environment variable
-     - Select "api" backend mode
+1. **AI Configuration (AI Tab)**:
+   - Set model name (default: gpt-4o)
+   - Configure API endpoint if needed
+   - Adjust scoring threshold (0-10)
+   - Set max clips per video
+   - Configure segment duration
 
-2. **Browser Configuration (Tab 4)**:
+2. **Browser Configuration (Upload Tab)**:
    - Browse to Brave executable (or leave empty for auto-detect)
-   - Optionally set profile path to reuse login sessions
+   - Set user data directory to reuse login sessions
+   - Select browser profile
    - Log into TikTok/Instagram/YouTube in Brave beforehand
+   - Test browser connection
 
-3. **Metadata Settings (Tab 3)**:
+3. **Metadata Settings (Metadata Tab)**:
    - Choose "Uniform" (same metadata) or "Randomized" (vary per clip)
    - Enter titles, descriptions, and tags
    - Enable/disable hashtag prefix
+   - Add optional captions
 
-4. **Run Pipeline (Tab 5)**:
-   - Select video in Tab 1
-   - Click "▶ Run Pipeline"
-   - Monitor progress in real-time
+4. **Run Pipeline (Run Tab)**:
+   - Select video in Input tab first
+   - Click "Start Pipeline"
+   - Monitor progress and view live logs in real-time
+   - Copy or save logs as needed
 
 ---
 
-## 🖥️ Desktop UI Features
+## 🌐 Web UI Features
 
-### Tab 1: Input Video
-- **File picker** with drag-drop support
+### Input Tab
+- **Video selection** with drag-drop zone
+- **Selection modes**: Single file, Multiple files, or Folder
 - **Output directory** configuration
-- File size and info display
+- **Cache toggle** for faster re-runs
+- Video info display (duration, resolution, size)
 
-### Tab 2: AI / Model Settings
-- **Ollama Controls**:
-  - Start/Stop server
-  - Load models (qwen2.5:3b-instruct, etc.)
-  - Real-time status indicators
-- **Model Configuration**:
-  - LLM backend selector (auto/local/api)
-  - Temperature control
-  - Score threshold slider
+### AI Tab
+- **Model configuration**: Set GitHub Models API model name
+- **API endpoint**: Custom endpoint support
+- **Scoring threshold** slider (0-10)
+- **Max clips** slider (1-50)
+- **Segment duration** configuration
+- Save settings to backend
 
-### Tab 3: Metadata Settings
+### Metadata Tab
 - **Two Modes**:
   - **Uniform**: Same metadata for all clips
   - **Randomized**: Random selection from comma-separated values
 - **Fields**:
   - Title(s)
   - Description(s)
-  - Caption(s) - **NEW**: Comma-separated captions with random selection
+  - Caption(s) - Comma-separated captions with random selection
   - Tags (comma-separated)
   - Hashtag prefix toggle
-- **Hook Phrase (Video Overlay)** - **NEW**:
-  - Add engaging text overlay to videos (e.g., "Wait for it...", "This is insane!")
-  - Position selector: Top Left, Top Right, Bottom Left, Bottom Right, Top Center
-  - Text appears at engaging spots (not center) with bold font and shadow for readability
-- **Logo Overlay** - **NEW**:
-  - Upload logo image (PNG with transparency recommended)
-  - Automatically placed at bottom center of videos
-  - Applied during preprocessing before upload
+- Save settings to backend
 
-### Tab 4: Upload Platforms
-- **Platform Selection**: TikTok, Instagram, YouTube Shorts
-- **Brave Browser**: Auto-detect or custom path
-- **Profile Reuse**: Use existing login sessions
-- **Anti-Ban Settings**: Configurable upload delays
-- **Auto-Schedule & Background Upload** - **NEW**:
-  - Enable automatic scheduled uploads
-  - Configure time gaps between uploads (hours and minutes)
-  - App runs in background and uploads at set intervals
-  - Works across all three platforms
+### Upload Tab
+- **Platform Selection**: TikTok, Instagram, YouTube Shorts checkboxes
+- **Brave Browser Configuration**:
+  - Browser executable path
+  - User data directory
+  - Profile directory selection
+- **Upload Options**:
+  - Upload delay configuration (seconds)
+  - Headless mode toggle
+  - Wait for upload confirmation toggle
+  - Auto-retry on failure toggle
+- **Test browser connection** button
+- Save settings to backend
 
-### Tab 5: Videos - **NEW**
+### Videos Tab
 - **Video Registry & Management**:
   - Add multiple videos from any folder (not just pipeline output)
   - Import ready-to-share videos with multi-select
@@ -188,15 +217,31 @@ The desktop application will open with 5 tabs:
   - Bulk upload all pending videos
   - Auto-refresh every 5 seconds
 - **Preprocessing Applied**:
-  - Hook phrases and logos automatically applied before upload
-  - Captions and metadata from Tab 3 used for uploads
-  - Random selection for varied content
+### Videos Tab
+- **Video Registry & Management**:
+  - View all processed videos in a table
+  - Track upload status per platform (TikTok, Instagram, YouTube)
+  - Add videos manually to registry
+  - Refresh video list
+  - Upload individual videos or batch upload
+  - Color-coded status badges (pending, completed, failed)
 
-### Tab 6: Run & Monitor
-- **Live Logs**: Real-time pipeline output
-- **Progress Bar**: Visual stage indicators
-- **Controls**: Run, Stop, Clear Logs
-- **Status Display**: Running/Success/Error states
+### Run Tab
+- **Pipeline Controls**:
+  - Start Pipeline button (with video path prompt)
+  - Stop Pipeline button (when running)
+  - Clear Logs button
+- **Status Display**:
+  - Current pipeline status badge (idle, running, completed, error)
+  - Video path and output directory display
+  - Progress bar with percentage (when running)
+- **Live Logs**:
+  - Terminal-style log viewer with JetBrains Mono font
+  - Color-coded log levels (info, success, warning, error)
+  - Real-time log streaming via Server-Sent Events (SSE)
+  - Copy logs to clipboard
+  - Save logs to file
+  - Auto-scroll to latest logs
 
 ---
 
