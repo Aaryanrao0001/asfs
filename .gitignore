@@ -85,3 +85,13 @@ ui_settings.json
 
 # Knowledge directory data (keep structure, not logs)
 knowledge/*.json
+
+# Web frontend build artifacts
+web/frontend/node_modules/
+web/frontend/build/
+web/frontend/.env.local
+web/frontend/.env.development.local
+web/frontend/.env.test.local
+web/frontend/.env.production.local
+web/frontend/package-lock.json
+web/frontend/yarn.lock

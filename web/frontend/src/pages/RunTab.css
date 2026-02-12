@@ -1,0 +1,30 @@
+.status-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--spacing-xl);
+}
+
+.status-info {
+  flex: 1;
+}
+
+.status-controls {
+  display: flex;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 767px) {
+  .status-section {
+    flex-direction: column;
+  }
+  
+  .status-controls {
+    width: 100%;
+  }
+  
+  .status-controls button {
+    flex: 1;
+  }
+}

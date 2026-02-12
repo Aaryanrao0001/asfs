@@ -1,0 +1,233 @@
+/* Main Layout */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+/* Top Navigation */
+.top-nav {
+  height: 72px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--glass-border);
+  padding: 0 var(--spacing-xl);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: var(--shadow-md);
+}
+
+.top-nav-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xl);
+}
+
+.nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.nav-logo-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--accent-primary);
+}
+
+.nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  list-style: none;
+}
+
+.nav-tab {
+  padding: 10px 20px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-normal);
+  position: relative;
+}
+
+.nav-tab:hover {
+  color: var(--accent-primary);
+  background: rgba(0, 255, 136, 0.05);
+}
+
+.nav-tab.active {
+  color: var(--accent-primary);
+  background: rgba(0, 255, 136, 0.1);
+}
+
+.nav-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  box-shadow: var(--shadow-glow);
+}
+
+.top-nav-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+/* Content Area */
+.content-wrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Side Navigation */
+.side-nav {
+  width: 280px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid var(--glass-border);
+  padding: var(--spacing-xl);
+  overflow-y: auto;
+}
+
+.side-nav-section {
+  margin-bottom: var(--spacing-2xl);
+}
+
+.side-nav-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--spacing-md);
+}
+
+.side-nav-items {
+  list-style: none;
+}
+
+.side-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-xs);
+  transition: all var(--transition-normal);
+}
+
+.side-nav-item:hover {
+  background: rgba(0, 255, 136, 0.05);
+  color: var(--accent-primary);
+}
+
+.side-nav-item.active {
+  background: rgba(0, 255, 136, 0.1);
+  color: var(--accent-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.side-nav-icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Main Content */
+.main-content {
+  flex: 1;
+  padding: var(--spacing-2xl);
+  overflow-y: auto;
+}
+
+.page-header {
+  margin-bottom: var(--spacing-2xl);
+}
+
+.page-title {
+  font-size: 36px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.page-description {
+  font-size: 16px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* Circuit Pattern Background */
+.circuit-pattern {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.06;
+}
+
+.circuit-pattern svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Responsive */
+@media (max-width: 1023px) {
+  .side-nav {
+    width: 60px;
+    padding: var(--spacing-md);
+  }
+  
+  .side-nav-title,
+  .side-nav-item span {
+    display: none;
+  }
+  
+  .side-nav-item {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 767px) {
+  .top-nav {
+    padding: 0 var(--spacing-md);
+  }
+  
+  .nav-tabs {
+    display: none;
+  }
+  
+  .side-nav {
+    display: none;
+  }
+  
+  .main-content {
+    padding: var(--spacing-lg);
+  }
+  
+  .page-title {
+    font-size: 28px;
+  }
+}
