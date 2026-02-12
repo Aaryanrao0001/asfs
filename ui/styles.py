@@ -45,7 +45,6 @@ QTabBar::tab {
     font-size: 14pt;
     font-weight: 500;
     min-width: 100px;
-    transition: all 200ms ease;
 }
 
 QTabBar::tab:selected {
@@ -86,7 +85,6 @@ QPushButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                stop:0 #60a5fa,
                                stop:1 #3b82f6);
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
 }
 
 QPushButton:pressed {
@@ -99,7 +97,6 @@ QPushButton:pressed {
 QPushButton:disabled {
     background-color: #2a2a2a;
     color: #6b6b6b;
-    box-shadow: none;
 }
 
 /* Secondary Buttons - Subtle with Depth */
@@ -113,7 +110,6 @@ QPushButton[secondary="true"] {
 QPushButton[secondary="true"]:hover {
     background-color: #2d2d2d;
     border: 1px solid #404040;
-    box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
 }
 
 QPushButton[secondary="true"]:pressed {
@@ -134,7 +130,6 @@ QPushButton[danger="true"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                stop:0 #f87171,
                                stop:1 #ef4444);
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
 }
 
 QPushButton[danger="true"]:pressed {
@@ -165,7 +160,6 @@ QLineEdit:hover, QTextEdit:hover, QPlainTextEdit:hover {
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
     border: 2px solid #3b82f6;
     background-color: #1a1a1a;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
 QLineEdit[readOnly="true"] {
@@ -199,7 +193,6 @@ QComboBox:hover {
 
 QComboBox:focus {
     border: 2px solid #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
 QComboBox::drop-down {
@@ -301,7 +294,6 @@ QSlider::handle:horizontal:hover {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                                stop:0 #60a5fa,
                                stop:1 #3b82f6);
-    box-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
 }
 
 QSlider::sub-page:horizontal {
@@ -343,8 +335,7 @@ QGroupBox {
     margin-top: 20px;
     padding-top: 24px;
     padding: 24px;
-    background-color: rgba(26, 26, 26, 0.6);
-    backdrop-filter: blur(10px);
+    background-color: rgba(26, 26, 26, 0.8);
 }
 
 QGroupBox::title {
@@ -507,7 +498,6 @@ QSpinBox:hover, QDoubleSpinBox:hover {
 
 QSpinBox:focus, QDoubleSpinBox:focus {
     border: 2px solid #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
 QSpinBox::up-button, QDoubleSpinBox::up-button {
