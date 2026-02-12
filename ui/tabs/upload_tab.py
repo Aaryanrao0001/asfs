@@ -17,6 +17,8 @@ class UploadTab(QWidget):
     
     # Signals
     settings_changed = Signal(dict)
+    start_scheduler_requested = Signal()
+    stop_scheduler_requested = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -182,10 +184,30 @@ class UploadTab(QWidget):
         schedule_group = QGroupBox("Auto-Schedule & Background Upload")
         schedule_layout = QVBoxLayout(schedule_group)
         
-        self.enable_scheduling = QCheckBox("Enable Auto-Scheduling")
-        self.enable_scheduling.setChecked(False)
-        self.enable_scheduling.stateChanged.connect(self.on_settings_changed)
-        schedule_layout.addWidget(self.enable_scheduling)
+        # Scheduler status and controls
+        status_h_layout = QHBoxLayout()
+        status_h_layout.addWidget(QLabel("Scheduler Status:"))
+        self.scheduler_status_label = QLabel("Stopped")
+        self.scheduler_status_label.setProperty("status", True)
+        status_h_layout.addWidget(self.scheduler_status_label)
+        status_h_layout.addStretch()
+        schedule_layout.addLayout(status_h_layout)
+        
+        # Start/Stop buttons
+        buttons_h_layout = QHBoxLayout()
+        self.start_scheduler_btn = QPushButton("▶ Start Scheduler")
+        self.start_scheduler_btn.setProperty("success", True)
+        self.start_scheduler_btn.setMinimumHeight(35)
+        buttons_h_layout.addWidget(self.start_scheduler_btn)
+        
+        self.stop_scheduler_btn = QPushButton("⏹ Stop Scheduler")
+        self.stop_scheduler_btn.setProperty("danger", True)
+        self.stop_scheduler_btn.setEnabled(False)
+        self.stop_scheduler_btn.setMinimumHeight(35)
+        buttons_h_layout.addWidget(self.stop_scheduler_btn)
+        
+        buttons_h_layout.addStretch()
+        schedule_layout.addLayout(buttons_h_layout)
         
         # Time gap between uploads
         gap_h_layout = QHBoxLayout()
@@ -209,7 +231,7 @@ class UploadTab(QWidget):
         
         schedule_layout.addLayout(gap_h_layout)
         
-        schedule_hint = QLabel("App will automatically upload videos at set intervals in the background")
+        schedule_hint = QLabel("Manually start the scheduler to upload videos at set intervals in the background")
         schedule_hint.setProperty("subheading", True)
         schedule_hint.setWordWrap(True)
         schedule_layout.addWidget(schedule_hint)
