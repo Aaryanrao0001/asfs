@@ -318,7 +318,7 @@ QLabel[heading="true"] {
     font-size: 20px;
     font-weight: 700;
     color: #ffffff;
-    padding: 8px 0px;
+    padding: 8px 0;
     letter-spacing: -0.5px;
 }
 
@@ -326,7 +326,7 @@ QLabel[subheading="true"] {
     font-size: 13px;
     font-weight: 500;
     color: #a0a0a0;
-    padding: 4px 0px;
+    padding: 4px 0;
 }
 
 /* ============================================
@@ -372,7 +372,7 @@ QScrollBar::handle:vertical:hover {
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0px;
+    height: 0;
 }
 
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
@@ -396,7 +396,7 @@ QScrollBar::handle:horizontal:hover {
 }
 
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-    width: 0px;
+    width: 0;
 }
 
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
