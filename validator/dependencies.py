@@ -16,32 +16,64 @@ logger = logging.getLogger(__name__)
 
 def check_ffmpeg() -> Tuple[bool, str]:
     """
-    Check if ffmpeg is available.
+    Check if ffmpeg is available with version validation.
     
     Returns:
         Tuple of (is_available, path_or_message)
     """
     ffmpeg_path = shutil.which("ffmpeg")
     
-    if ffmpeg_path:
-        return True, ffmpeg_path
-    else:
+    if not ffmpeg_path:
         return False, "ffmpeg not found in system PATH"
+    
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, '-version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout:
+            lines = result.stdout.split('\n')
+            version_line = lines[0] if lines else "version unknown"
+            return True, f"{ffmpeg_path} ({version_line})"
+        else:
+            return False, f"ffmpeg found but not working: {result.stderr}"
+    except subprocess.TimeoutExpired:
+        return False, f"ffmpeg found at {ffmpeg_path} but timed out checking version"
+    except Exception as e:
+        return False, f"ffmpeg found but error checking version: {e}"
 
 
 def check_ffprobe() -> Tuple[bool, str]:
     """
-    Check if ffprobe is available.
+    Check if ffprobe is available with version validation.
     
     Returns:
         Tuple of (is_available, path_or_message)
     """
     ffprobe_path = shutil.which("ffprobe")
     
-    if ffprobe_path:
-        return True, ffprobe_path
-    else:
-        return False, "ffprobe not found in system PATH"
+    if not ffprobe_path:
+        return False, "ffprobe not found in system PATH. Install FFmpeg package."
+    
+    try:
+        result = subprocess.run(
+            [ffprobe_path, '-version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout:
+            lines = result.stdout.split('\n')
+            version_line = lines[0] if lines else "version unknown"
+            return True, f"{ffprobe_path} ({version_line})"
+        else:
+            return False, f"ffprobe found but not working: {result.stderr}"
+    except subprocess.TimeoutExpired:
+        return False, f"ffprobe found at {ffprobe_path} but timed out checking version"
+    except Exception as e:
+        return False, f"ffprobe found but error checking version: {e}"
 
 
 def check_playwright() -> Tuple[bool, str]:

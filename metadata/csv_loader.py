@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def load_csv_metadata(csv_path: str) -> Dict[str, List[str]]:
     """
-    Load metadata from CSV file.
+    Load metadata from CSV file with robust validation.
     
     Expected CSV format:
     - Column headers: title, caption, description, tags (or hashtags)
@@ -33,6 +33,9 @@ def load_csv_metadata(csv_path: str) -> Dict[str, List[str]]:
     """
     if not Path(csv_path).exists():
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
+    
+    if not csv_path.endswith('.csv'):
+        raise ValueError(f"File must be CSV format: {csv_path}")
     
     metadata = {
         "titles": [],
@@ -58,21 +61,42 @@ def load_csv_metadata(csv_path: str) -> Dict[str, List[str]]:
             desc_col = headers.get('description') or headers.get('descriptions')
             tags_col = headers.get('tags') or headers.get('hashtags') or headers.get('tag')
             
+            # Check for at least one recognized column
+            if not any([title_col, caption_col, desc_col, tags_col]):
+                available_cols = ', '.join(reader.fieldnames)
+                raise ValueError(
+                    f"CSV missing required columns. "
+                    f"Required at least one of: title, caption, description, tags. "
+                    f"Found: {available_cols}"
+                )
+            
             row_count = 0
-            for row in reader:
+            empty_row_count = 0
+            
+            for row_num, row in enumerate(reader, start=2):  # Start at 2 (header is row 1)
                 row_count += 1
+                has_data = False
                 
                 # Extract title
                 if title_col and row.get(title_col):
-                    metadata["titles"].append(row[title_col].strip())
+                    title_val = row[title_col].strip()
+                    if title_val:
+                        metadata["titles"].append(title_val)
+                        has_data = True
                 
                 # Extract caption
                 if caption_col and row.get(caption_col):
-                    metadata["captions"].append(row[caption_col].strip())
+                    caption_val = row[caption_col].strip()
+                    if caption_val:
+                        metadata["captions"].append(caption_val)
+                        has_data = True
                 
                 # Extract description
                 if desc_col and row.get(desc_col):
-                    metadata["descriptions"].append(row[desc_col].strip())
+                    desc_val = row[desc_col].strip()
+                    if desc_val:
+                        metadata["descriptions"].append(desc_val)
+                        has_data = True
                 
                 # Extract tags (split by comma)
                 if tags_col and row.get(tags_col):
@@ -80,7 +104,14 @@ def load_csv_metadata(csv_path: str) -> Dict[str, List[str]]:
                     if tags_str:
                         # Split tags and clean them
                         row_tags = [t.strip() for t in tags_str.split(',') if t.strip()]
-                        metadata["tags"].extend(row_tags)
+                        if row_tags:
+                            metadata["tags"].extend(row_tags)
+                            has_data = True
+                
+                # Warn about empty rows
+                if not has_data:
+                    empty_row_count += 1
+                    logger.warning(f"Row {row_num}: Empty or all whitespace, skipping")
             
             # Remove duplicates from tags while preserving order
             seen = set()
@@ -91,19 +122,30 @@ def load_csv_metadata(csv_path: str) -> Dict[str, List[str]]:
                     unique_tags.append(tag)
             metadata["tags"] = unique_tags
             
-            logger.info(f"Loaded CSV metadata: {row_count} rows, "
+            logger.info(f"Loaded CSV metadata: {row_count} rows processed, "
+                       f"{empty_row_count} empty rows skipped, "
                        f"{len(metadata['titles'])} titles, "
                        f"{len(metadata['captions'])} captions, "
                        f"{len(metadata['descriptions'])} descriptions, "
                        f"{len(metadata['tags'])} unique tags")
             
-            # Warn if no metadata was found
-            if not any(metadata.values()):
-                logger.warning(f"No metadata found in CSV: {csv_path}")
+            # Error if no metadata was found
+            if not any([metadata['titles'], metadata['captions'], metadata['descriptions'], metadata['tags']]):
+                raise ValueError(f"CSV file contains no valid data rows: {csv_path}")
             
             return metadata
             
+    except UnicodeDecodeError as e:
+        raise ValueError(f"CSV file encoding error. Please save as UTF-8: {csv_path}. Error: {e}")
+    except csv.Error as e:
+        # Get line number if available
+        line_info = ""
+        if 'reader' in locals() and hasattr(reader, 'line_num'):
+            line_info = f" at row {reader.line_num}"
+        raise ValueError(f"CSV parsing error{line_info}: {e}")
     except Exception as e:
+        if isinstance(e, (FileNotFoundError, ValueError)):
+            raise
         logger.error(f"Error loading CSV metadata from {csv_path}: {e}")
         raise ValueError(f"Failed to load CSV metadata: {e}")
 

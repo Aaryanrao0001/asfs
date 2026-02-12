@@ -7,6 +7,7 @@ Solves the critical bugs in the pipeline:
 - Kill processes only once at startup
 - Thread-safe singleton pattern
 - Each uploader gets a new page (tab) from shared context
+- Thread safety: Playwright sync API requires same-thread usage
 """
 
 import logging
@@ -28,6 +29,10 @@ class BraveBrowserManager:
     3. Kill Brave processes only ONCE at the start
     4. Each uploader gets a new page (tab) from the shared context
     5. Browser cleanup happens only once at the end
+    6. Thread safety: All Playwright operations must occur in same thread
+    
+    IMPORTANT: Playwright's sync API uses greenlets which are NOT thread-safe.
+    The browser must be initialized and used from the SAME thread.
     """
     
     _instance: Optional['BraveBrowserManager'] = None
@@ -38,6 +43,8 @@ class BraveBrowserManager:
         self.browser_base: Optional[BraveBrowserBase] = None
         self.is_initialized = False
         self.active_pages = []
+        self.thread_id: Optional[int] = None  # Track initialization thread
+        self._page_lock = threading.Lock()  # Lock for page management
         
     @classmethod
     def get_instance(cls) -> 'BraveBrowserManager':
@@ -77,6 +84,7 @@ class BraveBrowserManager:
         Initialize the shared browser instance.
         
         MUST be called before get_page(). Only initializes once.
+        Records the thread ID to ensure all subsequent operations occur in same thread.
         
         Args:
             brave_path: Path to Brave executable (optional, auto-detect)
@@ -90,7 +98,9 @@ class BraveBrowserManager:
             logger.info("BraveBrowserManager already initialized, skipping")
             return
         
-        logger.info("Initializing shared Brave browser instance")
+        # Record the thread where browser is initialized
+        self.thread_id = threading.get_ident()
+        logger.info(f"Initializing shared Brave browser instance in thread {self.thread_id}")
         
         try:
             # Create BraveBrowserBase instance
@@ -104,11 +114,12 @@ class BraveBrowserManager:
             self.browser_base.launch(headless=False)
             
             self.is_initialized = True
-            logger.info("Shared Brave browser initialized successfully")
+            logger.info(f"Shared Brave browser initialized successfully in thread {self.thread_id}")
             
         except Exception as e:
             logger.error(f"Failed to initialize Brave browser: {e}")
             self.is_initialized = False
+            self.thread_id = None
             raise RuntimeError(f"Brave browser initialization failed: {e}")
     
     def get_page(self) -> Page:
@@ -117,24 +128,43 @@ class BraveBrowserManager:
         
         Each uploader should call this to get its own page.
         
+        CRITICAL: Must be called from the SAME thread that initialized the browser.
+        Playwright's sync API uses greenlets which are NOT thread-safe.
+        
         Returns:
             Playwright Page object (new tab in shared browser)
         
         Raises:
-            RuntimeError: If manager not initialized
+            RuntimeError: If manager not initialized or called from wrong thread
         """
         if not self.is_initialized or not self.browser_base or not self.browser_base.context:
             raise RuntimeError(
                 "BraveBrowserManager not initialized. Call initialize() first."
             )
         
-        # Create a new page (tab) in the shared context
-        page = self.browser_base.context.new_page()
-        self.active_pages.append(page)
+        # Verify we're in the same thread as initialization
+        current_thread = threading.get_ident()
+        if current_thread != self.thread_id:
+            error_msg = (
+                f"BraveBrowserManager.get_page() called from wrong thread!\n"
+                f"  Manager initialized in thread: {self.thread_id}\n"
+                f"  Current thread: {current_thread}\n"
+                f"  Playwright sync API requires same-thread usage.\n"
+                f"  This causes greenlet threading errors.\n"
+                f"  Solution: Initialize browser in worker thread, OR use main thread for all uploads."
+            )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
         
-        logger.info(f"Created new page (total active: {len(self.active_pages)})")
-        
-        return page
+        # Thread-safe page creation
+        with self._page_lock:
+            # Create a new page (tab) in the shared context
+            page = self.browser_base.context.new_page()
+            self.active_pages.append(page)
+            
+            logger.info(f"Created new page in thread {current_thread} (total active: {len(self.active_pages)})")
+            
+            return page
     
     def close_page(self, page: Page):
         """
@@ -143,13 +173,14 @@ class BraveBrowserManager:
         Args:
             page: Page to close
         """
-        try:
-            if page in self.active_pages:
-                self.active_pages.remove(page)
-            page.close()
-            logger.info(f"Closed page (remaining active: {len(self.active_pages)})")
-        except Exception as e:
-            logger.warning(f"Failed to close page: {e}")
+        with self._page_lock:
+            try:
+                if page in self.active_pages:
+                    self.active_pages.remove(page)
+                page.close()
+                logger.info(f"Closed page (remaining active: {len(self.active_pages)})")
+            except Exception as e:
+                logger.warning(f"Failed to close page: {e}")
     
     def navigate_to_blank(self, page: Page):
         """
@@ -191,6 +222,7 @@ class BraveBrowserManager:
         Close the shared browser instance and cleanup.
         
         MUST be called at the end of the pipeline (in a finally block).
+        Should be called from the same thread that initialized the browser.
         """
         if not self.is_initialized:
             logger.info("BraveBrowserManager not initialized, nothing to close")
@@ -198,27 +230,30 @@ class BraveBrowserManager:
         
         logger.info("Closing shared Brave browser instance")
         
-        try:
-            # Close all active pages
-            for page in self.active_pages[:]:  # Copy list to avoid modification during iteration
-                try:
-                    page.close()
-                except Exception as e:
-                    logger.warning(f"Failed to close page: {e}")
-            
-            self.active_pages.clear()
-            
-            # Close browser via BraveBrowserBase
-            if self.browser_base:
-                self.browser_base.close()
-                self.browser_base = None
-            
-            self.is_initialized = False
-            logger.info("Shared Brave browser closed successfully")
-            
-        except Exception as e:
-            logger.error(f"Error closing Brave browser: {e}")
-            self.is_initialized = False
+        with self._page_lock:
+            try:
+                # Close all active pages
+                for page in self.active_pages[:]:  # Copy list to avoid modification during iteration
+                    try:
+                        page.close()
+                    except Exception as e:
+                        logger.warning(f"Failed to close page: {e}")
+                
+                self.active_pages.clear()
+                
+                # Close browser via BraveBrowserBase
+                if self.browser_base:
+                    self.browser_base.close()
+                    self.browser_base = None
+                
+                self.is_initialized = False
+                self.thread_id = None
+                logger.info("Shared Brave browser closed successfully")
+                
+            except Exception as e:
+                logger.error(f"Error closing Brave browser: {e}")
+                self.is_initialized = False
+                self.thread_id = None
     
     def __enter__(self):
         """Context manager entry."""

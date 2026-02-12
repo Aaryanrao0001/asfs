@@ -983,7 +983,20 @@ def _upload_to_instagram_with_manager(
     page = None
     try:
         manager = BraveBrowserManager.get_instance()
-        page = manager.get_page()
+        
+        # Get page - this will raise RuntimeError if called from wrong thread
+        try:
+            page = manager.get_page()
+        except RuntimeError as e:
+            logger.error(f"Thread safety violation detected: {e}")
+            logger.warning("Falling back to standalone browser mode")
+            # Fallback to standalone mode
+            return upload_to_instagram_browser(
+                video_path=video_path,
+                title=title,
+                description=description,
+                tags=tags
+            )
         
         # Navigate to Instagram
         logger.info("Navigating to Instagram")
