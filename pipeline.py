@@ -937,22 +937,11 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
     video_registry.record_upload_attempt(video_id, platform, "IN_PROGRESS")
     audit.log_upload_event(video_id, platform, "uploading")
     
-    # Initialize browser manager (reuse existing if already initialized)
-    browser_manager = None
+    # NOTE: Do NOT initialize BraveBrowserManager here to avoid thread safety issues
+    # Each upload function will check if manager is initialized in the SAME thread,
+    # and if not, will fall back to standalone browser mode with persistent profile
+    
     try:
-        browser_manager = BraveBrowserManager.get_instance()
-        
-        # Initialize only if not already initialized
-        if not browser_manager.is_initialized:
-            logger.info("Initializing browser for this upload session")
-            browser_manager.initialize(
-                brave_path=brave_path,
-                user_data_dir=brave_user_data_dir,
-                profile_directory=brave_profile_directory
-            )
-        else:
-            logger.info("Reusing existing browser context")
-        
         # Execute upload
         upload_id = None
         

@@ -146,6 +146,15 @@ class MainWindow(QMainWindow):
         logger.debug(f"Upload settings changed: {settings}")
         self.save_settings()
         
+        # Set environment variables for browser configuration
+        # This ensures pipeline.py can access UI-configured browser settings
+        if settings.get("brave_path"):
+            os.environ["BRAVE_PATH"] = settings["brave_path"]
+        if settings.get("user_data_dir"):
+            os.environ["BRAVE_USER_DATA_DIR"] = settings["user_data_dir"]
+        if settings.get("profile_directory"):
+            os.environ["BRAVE_PROFILE_DIRECTORY"] = settings["profile_directory"]
+        
         # Update scheduler configuration (but don't auto-start)
         upload_gap_hours = settings.get("upload_gap_hours", 1)
         upload_gap_minutes = settings.get("upload_gap_minutes", 0)
@@ -230,6 +239,18 @@ class MainWindow(QMainWindow):
         try:
             # Get current metadata settings from UI
             metadata_settings = self.metadata_tab.get_settings()
+            
+            # Get upload settings for browser configuration
+            upload_settings = self.upload_tab.get_settings()
+            
+            # Set environment variables for browser configuration
+            # This ensures pipeline.py uses the UI-configured browser settings
+            if upload_settings.get("brave_path"):
+                os.environ["BRAVE_PATH"] = upload_settings["brave_path"]
+            if upload_settings.get("user_data_dir"):
+                os.environ["BRAVE_USER_DATA_DIR"] = upload_settings["user_data_dir"]
+            if upload_settings.get("profile_directory"):
+                os.environ["BRAVE_PROFILE_DIRECTORY"] = upload_settings["profile_directory"]
             
             # Merge with video metadata
             from metadata import MetadataConfig
@@ -402,6 +423,14 @@ class MainWindow(QMainWindow):
                     self.metadata_tab.set_settings(settings["metadata"])
                 if "upload" in settings:
                     self.upload_tab.set_settings(settings["upload"])
+                    # Also set environment variables from upload settings
+                    upload_settings = settings["upload"]
+                    if upload_settings.get("brave_path"):
+                        os.environ["BRAVE_PATH"] = upload_settings["brave_path"]
+                    if upload_settings.get("user_data_dir"):
+                        os.environ["BRAVE_USER_DATA_DIR"] = upload_settings["user_data_dir"]
+                    if upload_settings.get("profile_directory"):
+                        os.environ["BRAVE_PROFILE_DIRECTORY"] = upload_settings["profile_directory"]
                 
                 logger.info("Settings loaded")
         except Exception as e:
