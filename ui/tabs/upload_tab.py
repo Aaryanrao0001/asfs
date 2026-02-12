@@ -6,9 +6,10 @@ import sys
 import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QLineEdit, QPushButton, QGroupBox, QFileDialog, QSpinBox, QComboBox
+    QLineEdit, QPushButton, QGroupBox, QFileDialog, QSpinBox, QComboBox,
+    QScrollArea
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 
 class UploadTab(QWidget):
@@ -23,8 +24,21 @@ class UploadTab(QWidget):
     
     def init_ui(self):
         """Initialize the user interface."""
-        layout = QVBoxLayout(self)
+        # Create main layout with scroll area
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        # Create content widget
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
         
         # Title
         title = QLabel("Upload Platform Settings")
@@ -204,6 +218,10 @@ class UploadTab(QWidget):
         
         # Spacer
         layout.addStretch()
+        
+        # Set scroll area content
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
     
     def get_default_brave_path(self) -> str:
         """Get default Brave browser path for current platform."""

@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
-    QGroupBox, QMessageBox, QAbstractItemView, QFileDialog
+    QGroupBox, QMessageBox, QAbstractItemView, QFileDialog, QScrollArea
 )
 from PySide6.QtCore import Signal, Qt, QTimer
 from PySide6.QtGui import QPixmap, QIcon
@@ -50,8 +50,21 @@ class VideosTab(QWidget):
     
     def init_ui(self):
         """Initialize the user interface."""
-        layout = QVBoxLayout(self)
+        # Create main layout with scroll area
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        # Create content widget
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
         
         # Title
         title = QLabel("Video Registry & Upload Management")
@@ -109,6 +122,10 @@ class VideosTab(QWidget):
         videos_layout.addWidget(self.videos_table)
         
         layout.addWidget(videos_group)
+        
+        # Set scroll area content
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
         
         # Initial load
         self.refresh_videos()

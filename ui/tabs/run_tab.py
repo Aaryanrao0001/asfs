@@ -4,7 +4,7 @@ Run & Monitor Tab - Pipeline execution and live logging.
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QProgressBar, QGroupBox
+    QTextEdit, QProgressBar, QGroupBox, QScrollArea
 )
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QTextCursor
@@ -24,8 +24,21 @@ class RunTab(QWidget):
     
     def init_ui(self):
         """Initialize the user interface."""
-        layout = QVBoxLayout(self)
+        # Create main layout with scroll area
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        # Create content widget
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
         
         # Title
         title = QLabel("Run Pipeline & Monitor")
@@ -91,6 +104,10 @@ class RunTab(QWidget):
         logs_layout.addWidget(self.log_display)
         
         layout.addWidget(logs_group)
+        
+        # Set scroll area content
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
     
     def on_run_clicked(self):
         """Handle run button click."""

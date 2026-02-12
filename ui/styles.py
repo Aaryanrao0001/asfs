@@ -151,6 +151,10 @@ QLineEdit, QTextEdit, QPlainTextEdit {
     selection-background-color: #3b82f6;
 }
 
+QTextEdit, QPlainTextEdit {
+    min-height: 60px;
+}
+
 QLineEdit:hover, QTextEdit:hover, QPlainTextEdit:hover {
     border: 2px solid #333333;
     background-color: #1f1f1f;
@@ -330,9 +334,10 @@ QLabel[subheading="true"] {
    ============================================ */
 QGroupBox {
     border: 1px solid #2a2a2a;
-    border-radius: 12px;
-    margin-top: 20px;
-    padding: 24px 24px 24px 24px;
+    border-radius: 16px;
+    margin-top: 0px;
+    margin-bottom: 24px;
+    padding: 24px;
     background-color: rgba(26, 26, 26, 0.8);
 }
 
