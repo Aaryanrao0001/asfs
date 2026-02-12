@@ -33,8 +33,9 @@ def check_ffmpeg() -> Tuple[bool, str]:
             text=True,
             timeout=5
         )
-        if result.returncode == 0:
-            version_line = result.stdout.split('\n')[0]
+        if result.returncode == 0 and result.stdout:
+            lines = result.stdout.split('\n')
+            version_line = lines[0] if lines else "version unknown"
             return True, f"{ffmpeg_path} ({version_line})"
         else:
             return False, f"ffmpeg found but not working: {result.stderr}"
@@ -63,8 +64,9 @@ def check_ffprobe() -> Tuple[bool, str]:
             text=True,
             timeout=5
         )
-        if result.returncode == 0:
-            version_line = result.stdout.split('\n')[0]
+        if result.returncode == 0 and result.stdout:
+            lines = result.stdout.split('\n')
+            version_line = lines[0] if lines else "version unknown"
             return True, f"{ffprobe_path} ({version_line})"
         else:
             return False, f"ffprobe found but not working: {result.stderr}"

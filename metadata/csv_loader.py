@@ -138,7 +138,11 @@ def load_csv_metadata(csv_path: str) -> Dict[str, List[str]]:
     except UnicodeDecodeError as e:
         raise ValueError(f"CSV file encoding error. Please save as UTF-8: {csv_path}. Error: {e}")
     except csv.Error as e:
-        raise ValueError(f"CSV parsing error at row {reader.line_num if 'reader' in locals() else 'unknown'}: {e}")
+        # Get line number if available
+        line_info = ""
+        if 'reader' in locals() and hasattr(reader, 'line_num'):
+            line_info = f" at row {reader.line_num}"
+        raise ValueError(f"CSV parsing error{line_info}: {e}")
     except Exception as e:
         if isinstance(e, (FileNotFoundError, ValueError)):
             raise
