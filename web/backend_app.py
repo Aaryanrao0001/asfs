@@ -552,12 +552,20 @@ async def start_ollama():
 async def stop_ollama():
     """Stop Ollama server."""
     try:
-        # This is a simplified implementation
-        subprocess.run(['pkill', 'ollama'], timeout=5)
-        return {
-            'success': True,
-            'message': 'Ollama server stop requested'
-        }
+        # Find and kill the ollama process
+        result = subprocess.run(['pgrep', 'ollama'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            pid = result.stdout.strip().split('\n')[0]  # Get first PID
+            subprocess.run(['kill', pid], timeout=5)
+            return {
+                'success': True,
+                'message': 'Ollama server stop requested'
+            }
+        else:
+            return {
+                'success': False,
+                'message': 'Ollama server not running'
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to stop Ollama: {str(e)}')
 
