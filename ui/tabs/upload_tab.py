@@ -244,6 +244,10 @@ class UploadTab(QWidget):
         # Set scroll area content
         scroll.setWidget(content)
         main_layout.addWidget(scroll)
+        
+        # Connect button signals
+        self.start_scheduler_btn.clicked.connect(self.on_start_scheduler)
+        self.stop_scheduler_btn.clicked.connect(self.on_stop_scheduler)
     
     def get_default_brave_path(self) -> str:
         """Get default Brave browser path for current platform."""
@@ -421,7 +425,6 @@ class UploadTab(QWidget):
             "profile_directory": self.profile_directory.currentText(),
             "min_delay": self.min_delay.value(),
             "max_delay": self.max_delay.value(),
-            "enable_scheduling": self.enable_scheduling.isChecked(),
             "upload_gap_hours": self.upload_gap_hours.value(),
             "upload_gap_minutes": self.upload_gap_minutes.value()
         }
@@ -450,11 +453,29 @@ class UploadTab(QWidget):
         if "max_delay" in settings:
             self.max_delay.setValue(settings["max_delay"])
         
-        if "enable_scheduling" in settings:
-            self.enable_scheduling.setChecked(settings["enable_scheduling"])
-        
         if "upload_gap_hours" in settings:
             self.upload_gap_hours.setValue(settings["upload_gap_hours"])
         
         if "upload_gap_minutes" in settings:
             self.upload_gap_minutes.setValue(settings["upload_gap_minutes"])
+    
+    def on_start_scheduler(self):
+        """Handle start scheduler button click."""
+        self.start_scheduler_requested.emit()
+    
+    def on_stop_scheduler(self):
+        """Handle stop scheduler button click."""
+        self.stop_scheduler_requested.emit()
+    
+    def update_scheduler_status(self, is_running: bool):
+        """Update the scheduler status display."""
+        if is_running:
+            self.scheduler_status_label.setText("Running")
+            self.scheduler_status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+            self.start_scheduler_btn.setEnabled(False)
+            self.stop_scheduler_btn.setEnabled(True)
+        else:
+            self.scheduler_status_label.setText("Stopped")
+            self.scheduler_status_label.setStyleSheet("color: #888; font-weight: bold;")
+            self.start_scheduler_btn.setEnabled(True)
+            self.stop_scheduler_btn.setEnabled(False)
