@@ -91,7 +91,6 @@ QPushButton:pressed {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                stop:0 #2563eb,
                                stop:1 #1d4ed8);
-    padding: 15px 19px 13px 21px;
 }
 
 QPushButton:disabled {
