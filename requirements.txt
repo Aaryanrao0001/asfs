@@ -30,6 +30,10 @@ python-dotenv==1.0.0
 # Web Framework (replaces PySide6)
 flask>=3.0.0
 flask-cors>=4.0.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+websockets>=12.0
 
 # Browser Automation
 playwright>=1.40.0

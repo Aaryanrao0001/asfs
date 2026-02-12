@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GlassPanel, GlassPanelBody } from '../components/GlassPanel';
 import { TextInput, Checkbox, Toggle } from '../components/FormInputs';
-import { GlowButton, SecondaryButton } from '../components/Buttons';
+import { SecondaryButton } from '../components/Buttons';
 import { Upload, CheckCircle } from 'lucide-react';
+import { useToast } from '../components/Toast';
 import api from '../services/api';
 
 const UploadTab = () => {
@@ -20,10 +21,29 @@ const UploadTab = () => {
     wait_confirmation: true,
     auto_retry: true
   });
+  const toast = useToast();
+  const saveTimeoutRef = useRef(null);
 
   useEffect(() => {
     loadSettings();
   }, []);
+
+  // Auto-save settings with debounce
+  useEffect(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    saveTimeoutRef.current = setTimeout(() => {
+      saveSettings();
+    }, 500);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [settings]);
 
   const loadSettings = async () => {
     try {
@@ -33,21 +53,32 @@ const UploadTab = () => {
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
+      toast.error('Failed to load settings');
     }
   };
 
-  const handleSave = async () => {
+  const saveSettings = async () => {
     try {
+      await api.configureUpload({
+        platforms: settings.platforms,
+        brave_path: settings.brave_path,
+        user_data_dir: settings.user_data_dir,
+        profile_dir: settings.profile_dir
+      });
+      
+      // Also save other settings
       await api.saveSettings('upload', settings);
-      alert('Upload settings saved successfully!');
     } catch (error) {
-      alert('Failed to save settings: ' + error.message);
+      console.error('Failed to save settings:', error);
     }
   };
 
   const testBrowser = () => {
-    alert('Browser connection test would run here');
+    // TODO: Implement browser connection test
+    toast.info('Browser connection test not yet implemented');
   };
+
+  const selectedCount = Object.values(settings.platforms).filter(Boolean).length;
 
   return (
     <div className="upload-tab">
@@ -61,7 +92,19 @@ const UploadTab = () => {
       <div style={{ maxWidth: '800px' }}>
         <GlassPanel style={{ marginBottom: 'var(--spacing-xl)' }}>
           <GlassPanelBody>
-            <h3 style={{ marginBottom: 'var(--spacing-lg)' }}>Platform Selection</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-lg)' }}>
+              <h3 style={{ margin: 0 }}>Platform Selection</h3>
+              <span style={{ 
+                fontSize: '14px', 
+                color: 'var(--text-tertiary)',
+                background: selectedCount > 0 ? 'rgba(0, 255, 136, 0.1)' : 'transparent',
+                padding: '4px 12px',
+                borderRadius: '12px',
+                border: selectedCount > 0 ? '1px solid rgba(0, 255, 136, 0.3)' : 'none'
+              }}>
+                {selectedCount} selected
+              </span>
+            </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
               <Checkbox
@@ -89,6 +132,20 @@ const UploadTab = () => {
                 })}
               />
             </div>
+
+            {selectedCount === 0 && (
+              <div style={{ 
+                marginTop: 'var(--spacing-md)',
+                padding: 'var(--spacing-sm)',
+                fontSize: '13px',
+                color: '#ffc107',
+                background: 'rgba(255, 193, 7, 0.1)',
+                border: '1px solid rgba(255, 193, 7, 0.3)',
+                borderRadius: 'var(--radius-md)'
+              }}>
+                ⚠️ No platforms selected. Pipeline will skip upload step.
+              </div>
+            )}
           </GlassPanelBody>
         </GlassPanel>
 
@@ -137,7 +194,7 @@ const UploadTab = () => {
               label="Upload Delay (seconds)"
               type="number"
               value={settings.upload_delay}
-              onChange={(e) => setSettings({ ...settings, upload_delay: parseInt(e.target.value) })}
+              onChange={(e) => setSettings({ ...settings, upload_delay: parseInt(e.target.value) || 30 })}
               helper="Delay between uploads to different platforms"
             />
 
@@ -147,24 +204,39 @@ const UploadTab = () => {
                 checked={settings.headless}
                 onChange={(e) => setSettings({ ...settings, headless: e.target.checked })}
               />
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '-8px', marginLeft: '60px' }}>
+                Run browser in background without visible window
+              </p>
+
               <Toggle
                 label="Wait for Upload Confirmation"
                 checked={settings.wait_confirmation}
                 onChange={(e) => setSettings({ ...settings, wait_confirmation: e.target.checked })}
               />
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '-8px', marginLeft: '60px' }}>
+                Wait for platform to confirm upload before proceeding
+              </p>
+
               <Toggle
                 label="Auto-retry on Failure"
                 checked={settings.auto_retry}
                 onChange={(e) => setSettings({ ...settings, auto_retry: e.target.checked })}
               />
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '-8px', marginLeft: '60px' }}>
+                Automatically retry failed uploads
+              </p>
             </div>
           </GlassPanelBody>
         </GlassPanel>
 
-        <GlowButton onClick={handleSave}>
-          <Upload size={16} />
-          Save Upload Settings
-        </GlowButton>
+        <div style={{ 
+          padding: 'var(--spacing-sm)',
+          fontSize: '13px',
+          color: 'var(--text-tertiary)',
+          fontStyle: 'italic'
+        }}>
+          Settings are automatically saved
+        </div>
       </div>
     </div>
   );
