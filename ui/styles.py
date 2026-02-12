@@ -151,6 +151,10 @@ QLineEdit, QTextEdit, QPlainTextEdit {
     selection-background-color: #3b82f6;
 }
 
+QTextEdit, QPlainTextEdit {
+    min-height: 60px;
+}
+
 QLineEdit:hover, QTextEdit:hover, QPlainTextEdit:hover {
     border: 2px solid #333333;
     background-color: #1f1f1f;
@@ -314,7 +318,7 @@ QLabel[heading="true"] {
     font-size: 20px;
     font-weight: 700;
     color: #ffffff;
-    padding: 8px 0px;
+    padding: 8px 0;
     letter-spacing: -0.5px;
 }
 
@@ -322,7 +326,7 @@ QLabel[subheading="true"] {
     font-size: 13px;
     font-weight: 500;
     color: #a0a0a0;
-    padding: 4px 0px;
+    padding: 4px 0;
 }
 
 /* ============================================
@@ -330,9 +334,10 @@ QLabel[subheading="true"] {
    ============================================ */
 QGroupBox {
     border: 1px solid #2a2a2a;
-    border-radius: 12px;
-    margin-top: 20px;
-    padding: 24px 24px 24px 24px;
+    border-radius: 16px;
+    margin-top: 0;
+    margin-bottom: 24px;
+    padding: 24px;
     background-color: rgba(26, 26, 26, 0.8);
 }
 
@@ -367,7 +372,7 @@ QScrollBar::handle:vertical:hover {
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0px;
+    height: 0;
 }
 
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
@@ -391,7 +396,7 @@ QScrollBar::handle:horizontal:hover {
 }
 
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-    width: 0px;
+    width: 0;
 }
 
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {

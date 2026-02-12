@@ -4,9 +4,10 @@ Metadata Settings Tab - Title, description, and tags configuration.
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QTextEdit, QComboBox, QCheckBox, QGroupBox, QPushButton, QFileDialog
+    QTextEdit, QComboBox, QCheckBox, QGroupBox, QPushButton, QFileDialog,
+    QScrollArea
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 
 class MetadataTab(QWidget):
@@ -21,8 +22,21 @@ class MetadataTab(QWidget):
     
     def init_ui(self):
         """Initialize the user interface."""
-        layout = QVBoxLayout(self)
+        # Create main layout with scroll area
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        # Create content widget
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
         
         # Title
         title = QLabel("Metadata Settings")
@@ -60,7 +74,6 @@ class MetadataTab(QWidget):
         
         self.title_input = QTextEdit()
         self.title_input.setPlaceholderText("Enter title(s)")
-        self.title_input.setMaximumHeight(80)
         self.title_input.textChanged.connect(self.on_settings_changed)
         title_layout.addWidget(self.title_input)
         
@@ -76,7 +89,6 @@ class MetadataTab(QWidget):
         
         self.description_input = QTextEdit()
         self.description_input.setPlaceholderText("Enter description(s)")
-        self.description_input.setMaximumHeight(100)
         self.description_input.textChanged.connect(self.on_settings_changed)
         desc_layout.addWidget(self.description_input)
         
@@ -113,7 +125,6 @@ class MetadataTab(QWidget):
         
         self.caption_input = QTextEdit()
         self.caption_input.setPlaceholderText("Enter caption(s)")
-        self.caption_input.setMaximumHeight(100)
         self.caption_input.textChanged.connect(self.on_settings_changed)
         caption_layout.addWidget(self.caption_input)
         
@@ -182,6 +193,10 @@ class MetadataTab(QWidget):
         
         # Spacer
         layout.addStretch()
+        
+        # Set scroll area content
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
     
     def browse_logo(self):
         """Browse for logo image file."""

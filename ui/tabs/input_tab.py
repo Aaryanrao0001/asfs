@@ -6,9 +6,10 @@ import os
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QFileDialog, QGroupBox, QCheckBox, QButtonGroup, QRadioButton
+    QLineEdit, QFileDialog, QGroupBox, QCheckBox, QButtonGroup, QRadioButton,
+    QScrollArea
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 
 class InputTab(QWidget):
@@ -27,8 +28,21 @@ class InputTab(QWidget):
     
     def init_ui(self):
         """Initialize the user interface."""
-        layout = QVBoxLayout(self)
+        # Create main layout with scroll area
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        # Create content widget
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
         
         # Title
         title = QLabel("Input Video & Output Settings")
@@ -125,6 +139,10 @@ class InputTab(QWidget):
         
         # Spacer
         layout.addStretch()
+        
+        # Set scroll area content
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
     
     def browse_video(self):
         """Open file dialog to select video file(s) or folder."""

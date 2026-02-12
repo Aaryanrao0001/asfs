@@ -7,7 +7,7 @@ import yaml
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QSlider, QGroupBox
+    QLineEdit, QSlider, QGroupBox, QScrollArea
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -48,8 +48,21 @@ class AITab(QWidget):
     
     def init_ui(self):
         """Initialize the user interface."""
-        layout = QVBoxLayout(self)
+        # Create main layout with scroll area
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        
+        # Create content widget
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
         
         # Title
         title = QLabel("AI & Model Settings")
@@ -153,6 +166,10 @@ class AITab(QWidget):
         
         # Spacer
         layout.addStretch()
+        
+        # Set scroll area content
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
     
     def on_threshold_changed(self, value):
         """Handle threshold slider change."""
