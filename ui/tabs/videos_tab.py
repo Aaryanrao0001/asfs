@@ -91,6 +91,31 @@ class VideosTab(QWidget):
         
         layout.addLayout(controls_h_layout)
         
+        # Bulk Upload Configuration (NEW)
+        bulk_config_group = QGroupBox("Bulk Upload Settings")
+        bulk_config_layout = QHBoxLayout(bulk_config_group)
+        
+        bulk_config_layout.addWidget(QLabel("Delay between uploads:"))
+        
+        from PySide6.QtWidgets import QSpinBox
+        self.upload_delay_spinbox = QSpinBox()
+        self.upload_delay_spinbox.setMinimum(0)
+        self.upload_delay_spinbox.setMaximum(3600)
+        self.upload_delay_spinbox.setValue(60)  # Default 60 seconds
+        self.upload_delay_spinbox.setSuffix(" seconds")
+        self.upload_delay_spinbox.setToolTip(
+            "Time to wait between each upload in bulk upload mode (0 for no delay)"
+        )
+        bulk_config_layout.addWidget(self.upload_delay_spinbox)
+        
+        bulk_config_layout.addStretch()
+        
+        delay_hint = QLabel("Use delay to prevent rate limiting and spread uploads over time")
+        delay_hint.setProperty("subheading", True)
+        bulk_config_layout.addWidget(delay_hint)
+        
+        layout.addWidget(bulk_config_group)
+        
         # Videos table
         videos_group = QGroupBox("Videos")
         videos_layout = QVBoxLayout(videos_group)
@@ -578,8 +603,11 @@ class VideosTab(QWidget):
                 )
                 return
             
+            # Get delay from UI
+            delay_seconds = self.upload_delay_spinbox.value()
+            
             # Execute bulk upload in background worker
-            worker = BulkUploadWorker(upload_tasks)
+            worker = BulkUploadWorker(upload_tasks, delay_seconds=delay_seconds)
             worker.upload_started.connect(self.on_bulk_upload_started)
             worker.upload_finished.connect(self.on_bulk_upload_progress)
             worker.all_uploads_finished.connect(self.on_bulk_upload_complete)
