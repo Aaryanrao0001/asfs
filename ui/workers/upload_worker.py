@@ -1,6 +1,7 @@
 """Worker thread for video uploads."""
 
 import logging
+import time
 from PySide6.QtCore import QThread, Signal
 
 from pipeline import run_upload_stage
@@ -57,22 +58,24 @@ class BulkUploadWorker(QThread):
     upload_finished = Signal(str, str, bool)  # video_id, platform, success
     all_uploads_finished = Signal(int, int)  # successful_count, failed_count
     
-    def __init__(self, upload_tasks: list):
+    def __init__(self, upload_tasks: list, delay_seconds: int = 0):
         """
         Initialize bulk upload worker.
         
         Args:
             upload_tasks: List of tuples (video_id, platform, metadata)
+            delay_seconds: Delay in seconds between uploads (default: 0)
         """
         super().__init__()
         self.upload_tasks = upload_tasks
+        self.delay_seconds = delay_seconds
     
     def run(self):
         """Execute all uploads sequentially in background thread."""
         successful = 0
         failed = 0
         
-        for video_id, platform, metadata in self.upload_tasks:
+        for idx, (video_id, platform, metadata) in enumerate(self.upload_tasks):
             try:
                 self.upload_started.emit(video_id, platform)
                 logger.info(f"Bulk upload: {video_id} to {platform}")
@@ -85,6 +88,11 @@ class BulkUploadWorker(QThread):
                     successful += 1
                 else:
                     failed += 1
+                
+                # Wait between uploads (except after the last one)
+                if self.delay_seconds > 0 and idx < len(self.upload_tasks) - 1:
+                    logger.info(f"Waiting {self.delay_seconds} seconds before next upload...")
+                    time.sleep(self.delay_seconds)
                     
             except Exception as e:
                 logger.error(f"Bulk upload error: {video_id} to {platform} - {e}")

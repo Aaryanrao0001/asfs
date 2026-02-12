@@ -91,6 +91,31 @@ class VideosTab(QWidget):
         
         layout.addLayout(controls_h_layout)
         
+        # Bulk Upload Configuration (NEW)
+        bulk_config_group = QGroupBox("Bulk Upload Settings")
+        bulk_config_layout = QHBoxLayout(bulk_config_group)
+        
+        bulk_config_layout.addWidget(QLabel("Delay between uploads:"))
+        
+        from PySide6.QtWidgets import QSpinBox
+        self.upload_delay_spinbox = QSpinBox()
+        self.upload_delay_spinbox.setMinimum(0)
+        self.upload_delay_spinbox.setMaximum(3600)
+        self.upload_delay_spinbox.setValue(60)  # Default 60 seconds
+        self.upload_delay_spinbox.setSuffix(" seconds")
+        self.upload_delay_spinbox.setToolTip(
+            "Time to wait between each upload in bulk upload mode (0 for no delay)"
+        )
+        bulk_config_layout.addWidget(self.upload_delay_spinbox)
+        
+        bulk_config_layout.addStretch()
+        
+        delay_hint = QLabel("Use delay to prevent rate limiting and spread uploads over time")
+        delay_hint.setProperty("subheading", True)
+        bulk_config_layout.addWidget(delay_hint)
+        
+        layout.addWidget(bulk_config_group)
+        
         # Videos table
         videos_group = QGroupBox("Videos")
         videos_layout = QVBoxLayout(videos_group)
@@ -198,9 +223,15 @@ class VideosTab(QWidget):
             video_path: Path to video file
             
         Returns:
-            Duration in seconds
+            Duration in seconds, or 0.0 if ffprobe is not available
         """
         try:
+            # Check if ffprobe is available
+            import shutil
+            if not shutil.which('ffprobe'):
+                logger.warning("ffprobe not found - cannot determine video duration")
+                return 0.0
+            
             cmd = [
                 'ffprobe',
                 '-v', 'error',
@@ -219,9 +250,15 @@ class VideosTab(QWidget):
             if result.returncode == 0 and result.stdout.strip():
                 return float(result.stdout.strip())
             else:
-                logger.warning(f"Could not get duration for {video_path}")
+                logger.warning(f"Could not get duration for {video_path}: {result.stderr}")
                 return 0.0
                 
+        except FileNotFoundError:
+            logger.error("ffprobe not found in system PATH - please install FFmpeg")
+            return 0.0
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout getting duration for {video_path}")
+            return 0.0
         except Exception as e:
             logger.error(f"Error getting video duration: {e}")
             return 0.0
@@ -578,8 +615,11 @@ class VideosTab(QWidget):
                 )
                 return
             
+            # Get delay from UI
+            delay_seconds = self.upload_delay_spinbox.value()
+            
             # Execute bulk upload in background worker
-            worker = BulkUploadWorker(upload_tasks)
+            worker = BulkUploadWorker(upload_tasks, delay_seconds=delay_seconds)
             worker.upload_started.connect(self.on_bulk_upload_started)
             worker.upload_finished.connect(self.on_bulk_upload_progress)
             worker.all_uploads_finished.connect(self.on_bulk_upload_complete)

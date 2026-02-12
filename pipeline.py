@@ -53,13 +53,14 @@ from segmenter import build_sentence_windows, build_pause_windows
 from ai import score_segments, score_segments_enhanced
 from validator import deduplicate_clips, remove_overlapping_clips
 from clipper import extract_clips
-from metadata import generate_captions, generate_hashtags
+from metadata import generate_captions, generate_hashtags, MetadataConfig, resolve_metadata
 from scheduler import UploadQueue
 from scheduler.queue import load_rate_limits
 from uploaders import upload_to_tiktok, upload_to_instagram, upload_to_youtube, BraveBrowserManager
 from audit import AuditLogger
 from cache import PipelineCache
 from database import VideoRegistry
+from validator.dependencies import validate_dependencies_with_warnings, get_dependency_status_message
 
 
 # Configure logging
@@ -926,15 +927,21 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
     video_registry.record_upload_attempt(video_id, platform, "IN_PROGRESS")
     audit.log_upload_event(video_id, platform, "uploading")
     
-    # Initialize browser manager
+    # Initialize browser manager (reuse existing if already initialized)
     browser_manager = None
     try:
         browser_manager = BraveBrowserManager.get_instance()
-        browser_manager.initialize(
-            brave_path=brave_path,
-            user_data_dir=brave_user_data_dir,
-            profile_directory=brave_profile_directory
-        )
+        
+        # Initialize only if not already initialized
+        if not browser_manager.is_initialized:
+            logger.info("Initializing browser for this upload session")
+            browser_manager.initialize(
+                brave_path=brave_path,
+                user_data_dir=brave_user_data_dir,
+                profile_directory=brave_profile_directory
+            )
+        else:
+            logger.info("Reusing existing browser context")
         
         # Execute upload
         upload_id = None
@@ -999,8 +1006,9 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
         return False
         
     finally:
-        if browser_manager:
-            browser_manager.close()
+        # Don't close browser here - keep it open for reuse across multiple uploads
+        # Browser will be cleaned up by the main pipeline or when application exits
+        pass
 
 
 def main():

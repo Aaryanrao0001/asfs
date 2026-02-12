@@ -49,10 +49,47 @@ def run_app():
     logger.info("=" * 80)
     
     try:
+        # Check dependencies before starting
+        from validator.dependencies import check_all_dependencies, get_dependency_status_message
+        
+        logger.info("Checking dependencies...")
+        dependencies = check_all_dependencies()
+        
+        # Log dependency status
+        for name, (available, message) in dependencies.items():
+            if available:
+                logger.info(f"✓ {name}: {message}")
+            else:
+                logger.warning(f"✗ {name}: {message}")
+        
         app = create_app()
         
         # Create and show main window
         window = MainWindow()
+        
+        # Show dependency warnings if any are missing
+        missing = [name for name, (available, _) in dependencies.items() if not available]
+        if missing:
+            from PySide6.QtWidgets import QMessageBox
+            from validator.dependencies import get_installation_instructions
+            
+            warning_msg = "Some dependencies are missing:\n\n"
+            for dep in missing:
+                warning_msg += f"• {dep}\n"
+            
+            warning_msg += "\nThe application will start, but some features may not work properly.\n\n"
+            warning_msg += "See the log file (asfs_ui.log) for installation instructions."
+            
+            QMessageBox.warning(
+                window,
+                "Missing Dependencies",
+                warning_msg
+            )
+            
+            # Log installation instructions
+            for dep in missing:
+                logger.info(get_installation_instructions(dep))
+        
         window.show()
         
         logger.info("Application started successfully")
@@ -62,6 +99,8 @@ def run_app():
     
     except Exception as e:
         logger.error(f"Application error: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return 1
 
 
