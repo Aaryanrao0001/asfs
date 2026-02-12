@@ -119,6 +119,36 @@ class MetadataTab(QWidget):
         
         layout.addWidget(tags_group)
         
+        # CSV Import (NEW)
+        csv_group = QGroupBox("Import from CSV (Optional)")
+        csv_layout = QVBoxLayout(csv_group)
+        
+        csv_h_layout = QHBoxLayout()
+        self.csv_path_input = QLineEdit()
+        self.csv_path_input.setPlaceholderText("No CSV file selected")
+        self.csv_path_input.setReadOnly(True)
+        csv_h_layout.addWidget(self.csv_path_input)
+        
+        self.csv_browse_btn = QPushButton("Browse...")
+        self.csv_browse_btn.clicked.connect(self.browse_csv)
+        csv_h_layout.addWidget(self.csv_browse_btn)
+        
+        self.csv_clear_btn = QPushButton("Clear")
+        self.csv_clear_btn.clicked.connect(self.clear_csv)
+        csv_h_layout.addWidget(self.csv_clear_btn)
+        
+        csv_layout.addLayout(csv_h_layout)
+        
+        csv_hint = QLabel(
+            "CSV columns: title, caption, description, tags (one row per variant). "
+            "CSV values will be merged with fields above for randomized selection."
+        )
+        csv_hint.setProperty("subheading", True)
+        csv_hint.setWordWrap(True)
+        csv_layout.addWidget(csv_hint)
+        
+        layout.addWidget(csv_group)
+        
         # Caption configuration (NEW)
         caption_group = QGroupBox("Captions")
         caption_layout = QVBoxLayout(caption_group)
@@ -216,6 +246,38 @@ class MetadataTab(QWidget):
         self.logo_path_input.clear()
         self.on_settings_changed()
     
+    def browse_csv(self):
+        """Browse for CSV metadata file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select CSV Metadata File",
+            "",
+            "CSV Files (*.csv)"
+        )
+        
+        if file_path:
+            # Validate CSV format
+            from metadata import validate_csv_format
+            is_valid, message = validate_csv_format(file_path)
+            
+            if is_valid:
+                self.csv_path_input.setText(file_path)
+                self.on_settings_changed()
+            else:
+                # Show error message to user
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "Invalid CSV File",
+                    f"The selected CSV file is invalid:\n\n{message}\n\n"
+                    "Please ensure the CSV has headers like: title, caption, description, tags"
+                )
+    
+    def clear_csv(self):
+        """Clear CSV file selection."""
+        self.csv_path_input.clear()
+        self.on_settings_changed()
+    
     def on_mode_changed(self, mode: str):
         """Handle mode change."""
         is_randomized = (mode == "Randomized")
@@ -267,7 +329,8 @@ class MetadataTab(QWidget):
             "hashtag_prefix": self.hashtag_prefix.isChecked(),
             "hook_phrase": self.hook_phrase_input.text(),
             "hook_position": self.hook_position_selector.currentText(),
-            "logo_path": self.logo_path_input.text()
+            "logo_path": self.logo_path_input.text(),
+            "csv_file_path": self.csv_path_input.text()
         }
     
     def set_settings(self, settings: dict):
@@ -299,3 +362,6 @@ class MetadataTab(QWidget):
         
         if "logo_path" in settings:
             self.logo_path_input.setText(settings["logo_path"])
+        
+        if "csv_file_path" in settings:
+            self.csv_path_input.setText(settings["csv_file_path"])

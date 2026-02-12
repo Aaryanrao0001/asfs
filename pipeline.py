@@ -53,13 +53,14 @@ from segmenter import build_sentence_windows, build_pause_windows
 from ai import score_segments, score_segments_enhanced
 from validator import deduplicate_clips, remove_overlapping_clips
 from clipper import extract_clips
-from metadata import generate_captions, generate_hashtags
+from metadata import generate_captions, generate_hashtags, MetadataConfig, resolve_metadata
 from scheduler import UploadQueue
 from scheduler.queue import load_rate_limits
 from uploaders import upload_to_tiktok, upload_to_instagram, upload_to_youtube, BraveBrowserManager
 from audit import AuditLogger
 from cache import PipelineCache
 from database import VideoRegistry
+from validator.dependencies import validate_dependencies_with_warnings, get_dependency_status_message
 
 
 # Configure logging
