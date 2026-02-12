@@ -920,8 +920,18 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
     }
     
     # Use metadata if provided, otherwise use defaults
-    caption = metadata.get('caption', '') if metadata else ''
-    hashtags = metadata.get('hashtags', []) if metadata else []
+    if metadata:
+        title = metadata.get('title', '')
+        description = metadata.get('description', '')
+        caption = metadata.get('caption', '')
+        tags_str = metadata.get('tags', '')
+        # Convert tags string to list for upload functions
+        hashtags = [tag.strip() for tag in tags_str.split() if tag.strip()] if tags_str else []
+    else:
+        title = ''
+        description = ''
+        caption = ''
+        hashtags = []
     
     # Record upload start
     video_registry.record_upload_attempt(video_id, platform, "IN_PROGRESS")
@@ -947,11 +957,11 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
         upload_id = None
         
         if platform == "TikTok":
-            upload_id = upload_to_tiktok(video_file, caption, hashtags, credentials)
+            upload_id = upload_to_tiktok(video_file, title, description, caption, hashtags, credentials)
         elif platform == "Instagram":
-            upload_id = upload_to_instagram(video_file, caption, hashtags, credentials)
+            upload_id = upload_to_instagram(video_file, title, description, caption, hashtags, credentials)
         elif platform == "YouTube":
-            upload_id = upload_to_youtube(video_file, caption, hashtags, credentials)
+            upload_id = upload_to_youtube(video_file, title, description, caption, hashtags, credentials)
         else:
             logger.error(f"Unknown platform: {platform}")
             return False
