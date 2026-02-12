@@ -11,7 +11,7 @@ QWidget {
     background-color: #0f0f0f;
     color: #e5e5e5;
     font-family: 'Inter', 'SF Pro Display', 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 14pt;
+    font-size: 14px;
     font-weight: 400;
     selection-background-color: #3b82f6;
     selection-color: #ffffff;
@@ -42,7 +42,7 @@ QTabBar::tab {
     margin-right: 4px;
     border: none;
     border-bottom: 3px solid transparent;
-    font-size: 14pt;
+    font-size: 14px;
     font-weight: 500;
     min-width: 100px;
 }
@@ -75,9 +75,9 @@ QPushButton {
     border: none;
     padding: 14px 20px;
     border-radius: 8px;
-    font-size: 14pt;
+    font-size: 14px;
     font-weight: 600;
-    min-height: 44px;
+    min-height: 48px;
     min-width: 100px;
 }
 
@@ -147,8 +147,8 @@ QLineEdit, QTextEdit, QPlainTextEdit {
     border: 2px solid #2a2a2a;
     padding: 12px 16px;
     border-radius: 8px;
-    font-size: 14pt;
-    min-height: 40px;
+    font-size: 14px;
+    min-height: 44px;
     selection-background-color: #3b82f6;
 }
 
@@ -182,8 +182,8 @@ QComboBox {
     border: 2px solid #2a2a2a;
     padding: 12px 16px;
     border-radius: 8px;
-    font-size: 14pt;
-    min-height: 40px;
+    font-size: 14px;
+    min-height: 44px;
 }
 
 QComboBox:hover {
@@ -236,7 +236,7 @@ QComboBox QAbstractItemView::item:hover {
 QCheckBox, QRadioButton {
     spacing: 10px;
     color: #e5e5e5;
-    font-size: 14pt;
+    font-size: 14px;
 }
 
 QCheckBox::indicator, QRadioButton::indicator {
@@ -312,7 +312,7 @@ QLabel {
 }
 
 QLabel[heading="true"] {
-    font-size: 20pt;
+    font-size: 20px;
     font-weight: 700;
     color: #ffffff;
     padding: 8px 0px;
@@ -320,7 +320,7 @@ QLabel[heading="true"] {
 }
 
 QLabel[subheading="true"] {
-    font-size: 13pt;
+    font-size: 13px;
     font-weight: 500;
     color: #a0a0a0;
     padding: 4px 0px;
@@ -333,8 +333,7 @@ QGroupBox {
     border: 1px solid #2a2a2a;
     border-radius: 12px;
     margin-top: 20px;
-    padding-top: 24px;
-    padding: 24px;
+    padding: 24px 24px 24px 24px;
     background-color: rgba(26, 26, 26, 0.8);
 }
 
@@ -344,7 +343,7 @@ QGroupBox::title {
     padding: 8px 16px;
     color: #ffffff;
     font-weight: 700;
-    font-size: 15pt;
+    font-size: 15px;
     background-color: transparent;
     border-radius: 6px;
 }
@@ -410,7 +409,7 @@ QProgressBar {
     background-color: #1a1a1a;
     color: #ffffff;
     font-weight: 600;
-    font-size: 13pt;
+    font-size: 13px;
     min-height: 32px;
 }
 
@@ -427,25 +426,25 @@ QProgressBar::chunk {
 QLabel[status="running"] {
     color: #10b981;
     font-weight: 700;
-    font-size: 14pt;
+    font-size: 14px;
 }
 
 QLabel[status="stopped"] {
     color: #6b6b6b;
     font-weight: 700;
-    font-size: 14pt;
+    font-size: 14px;
 }
 
 QLabel[status="error"] {
     color: #ef4444;
     font-weight: 700;
-    font-size: 14pt;
+    font-size: 14px;
 }
 
 QLabel[status="success"] {
     color: #10b981;
     font-weight: 700;
-    font-size: 14pt;
+    font-size: 14px;
 }
 
 /* ============================================
@@ -457,7 +456,7 @@ QToolTip {
     border: 1px solid #333333;
     border-radius: 6px;
     padding: 8px 12px;
-    font-size: 13pt;
+    font-size: 13px;
 }
 
 /* ============================================
@@ -469,7 +468,7 @@ QMessageBox {
 
 QMessageBox QLabel {
     color: #e5e5e5;
-    font-size: 14pt;
+    font-size: 14px;
     min-width: 300px;
 }
 
@@ -487,8 +486,8 @@ QSpinBox, QDoubleSpinBox {
     border: 2px solid #2a2a2a;
     padding: 12px 16px;
     border-radius: 8px;
-    font-size: 14pt;
-    min-height: 40px;
+    font-size: 14px;
+    min-height: 44px;
 }
 
 QSpinBox:hover, QDoubleSpinBox:hover {
@@ -536,7 +535,7 @@ QMenu::item {
     padding: 10px 20px;
     border-radius: 6px;
     color: #e5e5e5;
-    font-size: 14pt;
+    font-size: 14px;
 }
 
 QMenu::item:selected {
