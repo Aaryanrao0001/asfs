@@ -929,18 +929,17 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
     
     # Initialize browser manager (reuse existing if already initialized)
     browser_manager = None
-    should_close_browser = False  # Only close if we initialized it
     try:
         browser_manager = BraveBrowserManager.get_instance()
         
         # Initialize only if not already initialized
         if not browser_manager.is_initialized:
+            logger.info("Initializing browser for this upload session")
             browser_manager.initialize(
                 brave_path=brave_path,
                 user_data_dir=brave_user_data_dir,
                 profile_directory=brave_profile_directory
             )
-            should_close_browser = True  # We initialized it, so we should close it
         else:
             logger.info("Reusing existing browser context")
         
@@ -1007,12 +1006,9 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
         return False
         
     finally:
-        # Only close browser if we initialized it in this function
-        if browser_manager and should_close_browser:
-            logger.info("Closing browser context (was initialized by this upload)")
-            browser_manager.close()
-        elif browser_manager:
-            logger.debug("Keeping browser context open (was already initialized)")
+        # Don't close browser here - keep it open for reuse across multiple uploads
+        # Browser will be cleaned up by the main pipeline or when application exits
+        pass
 
 
 def main():
