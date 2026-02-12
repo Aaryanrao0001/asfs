@@ -335,7 +335,7 @@ QLabel[subheading="true"] {
 QGroupBox {
     border: 1px solid #2a2a2a;
     border-radius: 16px;
-    margin-top: 0px;
+    margin-top: 0;
     margin-bottom: 24px;
     padding: 24px;
     background-color: rgba(26, 26, 26, 0.8);
