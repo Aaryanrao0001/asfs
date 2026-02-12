@@ -8,10 +8,11 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
-    QGroupBox, QMessageBox, QAbstractItemView
+    QGroupBox, QMessageBox, QAbstractItemView, QFileDialog
 )
 from PySide6.QtCore import Signal, Qt, QTimer
 from PySide6.QtGui import QPixmap, QIcon
+import subprocess
 
 from database import VideoRegistry
 from ..workers.upload_worker import UploadWorker, BulkUploadWorker
@@ -30,12 +31,22 @@ class VideosTab(QWidget):
         super().__init__(parent)
         self.video_registry = VideoRegistry()
         self.upload_workers = []  # Track active upload workers
+        self.metadata_callback = None  # Callback to get metadata settings from parent
         self.init_ui()
         
         # Auto-refresh timer
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_videos)
         self.refresh_timer.start(5000)  # Refresh every 5 seconds
+    
+    def set_metadata_callback(self, callback):
+        """
+        Set callback to get metadata settings from parent window.
+        
+        Args:
+            callback: Function that returns metadata settings dict
+        """
+        self.metadata_callback = callback
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -49,6 +60,10 @@ class VideosTab(QWidget):
         
         # Control buttons
         controls_h_layout = QHBoxLayout()
+        
+        self.add_videos_btn = QPushButton("➕ Add Videos")
+        self.add_videos_btn.clicked.connect(self.add_videos_from_folder)
+        controls_h_layout.addWidget(self.add_videos_btn)
         
         self.refresh_btn = QPushButton("🔄 Refresh")
         self.refresh_btn.setProperty("secondary", True)
@@ -97,6 +112,102 @@ class VideosTab(QWidget):
         
         # Initial load
         self.refresh_videos()
+    
+    def add_videos_from_folder(self):
+        """Add multiple videos from any folder to the registry."""
+        file_dialog = QFileDialog(self)
+        file_dialog.setFileMode(QFileDialog.ExistingFiles)
+        file_dialog.setNameFilter("Video Files (*.mp4 *.mov *.avi *.mkv *.webm)")
+        file_dialog.setWindowTitle("Select Videos to Add")
+        
+        if file_dialog.exec():
+            selected_files = file_dialog.selectedFiles()
+            
+            if not selected_files:
+                return
+            
+            # Add each video to registry
+            added_count = 0
+            skipped_count = 0
+            
+            for video_path in selected_files:
+                try:
+                    # Get video duration using ffprobe
+                    duration = self._get_video_duration(video_path)
+                    
+                    # Generate video ID from filename
+                    video_id = Path(video_path).stem
+                    
+                    # Register video
+                    # Note: Checksum calculation is skipped for performance reasons.
+                    # This means duplicate files won't be detected based on content,
+                    # only by video_id (filename). For large video libraries where
+                    # content-based deduplication is needed, set calculate_checksum=True.
+                    success = self.video_registry.register_video(
+                        video_id=video_id,
+                        file_path=video_path,
+                        title=video_id,
+                        duration=duration,
+                        duplicate_allowed=False,
+                        calculate_checksum=False  # Skip checksum for speed
+                    )
+                    
+                    if success:
+                        added_count += 1
+                        logger.info(f"Added video to registry: {video_id}")
+                    else:
+                        skipped_count += 1
+                        logger.warning(f"Video already exists: {video_id}")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to add video {video_path}: {e}")
+                    skipped_count += 1
+            
+            # Show summary
+            message = f"Added {added_count} video(s)"
+            if skipped_count > 0:
+                message += f"\nSkipped {skipped_count} (already exist or error)"
+            
+            QMessageBox.information(self, "Videos Added", message)
+            
+            # Refresh table
+            self.refresh_videos()
+    
+    def _get_video_duration(self, video_path: str) -> float:
+        """
+        Get video duration using ffprobe.
+        
+        Args:
+            video_path: Path to video file
+            
+        Returns:
+            Duration in seconds
+        """
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30  # Increased timeout for large files
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip())
+            else:
+                logger.warning(f"Could not get duration for {video_path}")
+                return 0.0
+                
+        except Exception as e:
+            logger.error(f"Error getting video duration: {e}")
+            return 0.0
     
     def get_status_icon(self, status: str) -> str:
         """
@@ -326,8 +437,36 @@ class VideosTab(QWidget):
         )
         
         if reply == QMessageBox.Yes:
+            # Get metadata settings from parent window if available
+            metadata = {}
+            if self.metadata_callback:
+                try:
+                    metadata_settings = self.metadata_callback()
+                    
+                    # Resolve metadata using the metadata resolver
+                    from metadata import MetadataConfig
+                    from metadata.resolver import resolve_metadata
+                    
+                    config = MetadataConfig.from_ui_values(
+                        mode=metadata_settings.get("mode", "uniform"),
+                        title_input=metadata_settings.get("title", ""),
+                        description_input=metadata_settings.get("description", ""),
+                        caption_input=metadata_settings.get("caption", ""),
+                        tags_input=metadata_settings.get("tags", ""),
+                        hashtag_prefix=metadata_settings.get("hashtag_prefix", True),
+                        hook_phrase=metadata_settings.get("hook_phrase", ""),
+                        hook_position=metadata_settings.get("hook_position", "Top Left"),
+                        logo_path=metadata_settings.get("logo_path", "")
+                    )
+                    
+                    metadata = resolve_metadata(config)
+                    logger.info(f"Applied metadata settings to upload: {metadata}")
+                    
+                except Exception as e:
+                    logger.error(f"Error getting metadata settings: {e}")
+            
             # Execute upload in background worker thread
-            worker = UploadWorker(video_id, platform)
+            worker = UploadWorker(video_id, platform, metadata)
             worker.upload_started.connect(self.on_upload_started)
             worker.upload_finished.connect(self.on_upload_finished)
             worker.upload_error.connect(self.on_upload_error)

@@ -59,6 +59,9 @@ class MainWindow(QMainWindow):
         
         # Connect signals
         self.connect_signals()
+        
+        # Set metadata callback for videos tab
+        self.videos_tab.set_metadata_callback(lambda: self.metadata_tab.get_settings())
     
     def init_workers(self):
         """Initialize background workers."""
@@ -67,6 +70,22 @@ class MainWindow(QMainWindow):
         self.pipeline_worker.progress_update.connect(self.on_pipeline_progress)
         self.pipeline_worker.finished.connect(self.on_pipeline_finished)
         self.pipeline_worker.error_occurred.connect(self.on_pipeline_error)
+        
+        # Initialize scheduler
+        try:
+            from scheduler.auto_scheduler import get_scheduler
+            self.scheduler = get_scheduler()
+            self.scheduler.set_upload_callback(self.execute_scheduled_upload)
+            logger.info("Scheduler initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize scheduler: {e}")
+            # Create a dummy scheduler that does nothing
+            class DummyScheduler:
+                def configure(self, **kwargs): pass
+                def is_running(self): return False
+                def start(self): logger.warning("Scheduler not available")
+                def stop(self): pass
+            self.scheduler = DummyScheduler()
     
     def connect_signals(self):
         """Connect all UI signals to handlers."""
@@ -124,6 +143,82 @@ class MainWindow(QMainWindow):
         """Handle upload settings change."""
         logger.debug(f"Upload settings changed: {settings}")
         self.save_settings()
+        
+        # Update scheduler configuration
+        enable_scheduling = settings.get("enable_scheduling", False)
+        upload_gap_hours = settings.get("upload_gap_hours", 1)
+        upload_gap_minutes = settings.get("upload_gap_minutes", 0)
+        
+        # Get selected platforms
+        platforms_config = settings.get("platforms", {})
+        enabled_platforms = []
+        if platforms_config.get("instagram"):
+            enabled_platforms.append("Instagram")
+        if platforms_config.get("tiktok"):
+            enabled_platforms.append("TikTok")
+        if platforms_config.get("youtube"):
+            enabled_platforms.append("YouTube")
+        
+        # Configure scheduler
+        self.scheduler.configure(
+            upload_gap_hours=upload_gap_hours,
+            upload_gap_minutes=upload_gap_minutes,
+            platforms=enabled_platforms
+        )
+        
+        # Start or stop scheduler based on setting
+        if enable_scheduling and not self.scheduler.is_running():
+            self.scheduler.start()
+            logger.info("Auto-scheduler started")
+        elif not enable_scheduling and self.scheduler.is_running():
+            self.scheduler.stop()
+            logger.info("Auto-scheduler stopped")
+    
+    def execute_scheduled_upload(self, video_id: str, platform: str, metadata: dict) -> bool:
+        """
+        Execute a scheduled upload (called by scheduler).
+        
+        Args:
+            video_id: Video ID to upload
+            platform: Platform name
+            metadata: Video metadata
+            
+        Returns:
+            True if upload succeeded, False otherwise
+        """
+        try:
+            # Get current metadata settings from UI
+            metadata_settings = self.metadata_tab.get_settings()
+            
+            # Merge with video metadata
+            from metadata import MetadataConfig
+            from metadata.resolver import resolve_metadata
+            
+            # Create metadata config from UI settings
+            config = MetadataConfig.from_ui_values(
+                mode=metadata_settings.get("mode", "uniform"),
+                title_input=metadata_settings.get("title", ""),
+                description_input=metadata_settings.get("description", ""),
+                caption_input=metadata_settings.get("caption", ""),
+                tags_input=metadata_settings.get("tags", ""),
+                hashtag_prefix=metadata_settings.get("hashtag_prefix", True),
+                hook_phrase=metadata_settings.get("hook_phrase", ""),
+                hook_position=metadata_settings.get("hook_position", "Top Left"),
+                logo_path=metadata_settings.get("logo_path", "")
+            )
+            
+            # Resolve metadata for this upload
+            resolved = resolve_metadata(config)
+            
+            # Execute upload
+            from pipeline import run_upload_stage
+            success = run_upload_stage(video_id, platform, resolved)
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error in scheduled upload: {e}")
+            return False
     
     def on_run_pipeline(self):
         """Handle run pipeline request."""

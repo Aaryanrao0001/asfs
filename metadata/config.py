@@ -23,11 +23,21 @@ class MetadataConfig:
     # Description settings
     descriptions: List[str] = None  # Multiple descriptions for randomized mode
     
+    # Caption settings (NEW)
+    captions: List[str] = None  # Multiple captions for randomized mode
+    
     # Tags settings
     tags: List[str] = None  # List of tags (shuffled in randomized mode)
     
     # Hashtag prefix toggle
     hashtag_prefix: bool = True
+    
+    # Hook phrase for video overlay (NEW)
+    hook_phrase: str = ""
+    hook_position: str = "Top Left"
+    
+    # Logo overlay (NEW)
+    logo_path: str = ""
     
     def __post_init__(self):
         """Initialize default empty lists."""
@@ -35,12 +45,16 @@ class MetadataConfig:
             self.titles = [""]
         if self.descriptions is None:
             self.descriptions = [""]
+        if self.captions is None:
+            self.captions = [""]
         if self.tags is None:
             self.tags = []
     
     @classmethod
     def from_ui_values(cls, mode: str, title_input: str, description_input: str, 
-                       tags_input: str, hashtag_prefix: bool = True) -> 'MetadataConfig':
+                       caption_input: str, tags_input: str, hashtag_prefix: bool = True,
+                       hook_phrase: str = "", hook_position: str = "Top Left",
+                       logo_path: str = "") -> 'MetadataConfig':
         """
         Create MetadataConfig from UI input values.
         
@@ -48,8 +62,12 @@ class MetadataConfig:
             mode: "uniform" or "randomized"
             title_input: Comma-separated titles (for randomized) or single title (for uniform)
             description_input: Comma-separated descriptions or single description
+            caption_input: Comma-separated captions or single caption
             tags_input: Comma-separated tags
             hashtag_prefix: Whether to add # prefix to tags
+            hook_phrase: Text to overlay on video
+            hook_position: Position for hook phrase overlay
+            logo_path: Path to logo image file
             
         Returns:
             MetadataConfig instance
@@ -58,9 +76,11 @@ class MetadataConfig:
         if mode == "randomized":
             titles = [t.strip() for t in title_input.split(',') if t.strip()]
             descriptions = [d.strip() for d in description_input.split(',') if d.strip()]
+            captions = [c.strip() for c in caption_input.split(',') if c.strip()]
         else:
             titles = [title_input.strip()] if title_input.strip() else [""]
             descriptions = [description_input.strip()] if description_input.strip() else [""]
+            captions = [caption_input.strip()] if caption_input.strip() else [""]
         
         tags = [t.strip() for t in tags_input.split(',') if t.strip()]
         
@@ -68,8 +88,12 @@ class MetadataConfig:
             mode=mode,
             titles=titles if titles else [""],
             descriptions=descriptions if descriptions else [""],
+            captions=captions if captions else [""],
             tags=tags,
-            hashtag_prefix=hashtag_prefix
+            hashtag_prefix=hashtag_prefix,
+            hook_phrase=hook_phrase,
+            hook_position=hook_position,
+            logo_path=logo_path
         )
     
     def to_dict(self) -> dict:
@@ -78,8 +102,12 @@ class MetadataConfig:
             "mode": self.mode,
             "titles": self.titles,
             "descriptions": self.descriptions,
+            "captions": self.captions,
             "tags": self.tags,
-            "hashtag_prefix": self.hashtag_prefix
+            "hashtag_prefix": self.hashtag_prefix,
+            "hook_phrase": self.hook_phrase,
+            "hook_position": self.hook_position,
+            "logo_path": self.logo_path
         }
     
     @classmethod
@@ -89,6 +117,10 @@ class MetadataConfig:
             mode=data.get("mode", "uniform"),
             titles=data.get("titles", [""]),
             descriptions=data.get("descriptions", [""]),
+            captions=data.get("captions", [""]),
             tags=data.get("tags", []),
-            hashtag_prefix=data.get("hashtag_prefix", True)
+            hashtag_prefix=data.get("hashtag_prefix", True),
+            hook_phrase=data.get("hook_phrase", ""),
+            hook_position=data.get("hook_position", "Top Left"),
+            logo_path=data.get("logo_path", "")
         )

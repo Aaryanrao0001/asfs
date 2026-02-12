@@ -856,10 +856,12 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
     that's already registered in the video registry. Used by the UI for
     manual uploads and retries.
     
+    Applies video preprocessing (hook phrase and logo overlays) if metadata provided.
+    
     Args:
         video_id: Video ID from the registry
         platform: Target platform (Instagram, TikTok, or YouTube)
-        metadata: Optional metadata override (caption, hashtags, etc.)
+        metadata: Optional metadata override (caption, hashtags, hook_phrase, logo_path, etc.)
         
     Returns:
         True if upload succeeded, False otherwise
@@ -893,6 +895,17 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
             error_message="Video file not found"
         )
         return False
+    
+    # Apply video preprocessing if needed (hook phrase and/or logo overlay)
+    if metadata and (metadata.get('hook_phrase') or metadata.get('logo_path')):
+        from clipper.video_overlay import preprocess_video_for_upload
+        
+        output_dir = os.path.join("output", "preprocessed")
+        processed_video = preprocess_video_for_upload(video_file, output_dir, metadata)
+        
+        if processed_video and processed_video != video_file:
+            logger.info(f"Using preprocessed video: {processed_video}")
+            video_file = processed_video
     
     # Load browser configuration
     brave_path = os.getenv("BRAVE_PATH")
