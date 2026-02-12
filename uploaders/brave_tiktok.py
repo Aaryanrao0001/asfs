@@ -656,9 +656,7 @@ def upload_to_tiktok(
     tags = " ".join(hashtags) if hashtags else ""
     
     # Use caption if provided, otherwise fall back to title/description
-    if not caption and not title and not description:
-        caption = ""
-    elif not caption:
+    if not caption:
         # Fallback: if caption is empty, compose from title and description
         caption = f"{title}\n\n{description}".strip()
     

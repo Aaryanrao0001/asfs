@@ -957,11 +957,14 @@ def upload_to_instagram(
     tags = " ".join(hashtags) if hashtags else ""
     
     # Use caption if provided, otherwise fall back to title/description
-    if not caption and not title and not description:
-        caption = ""
-    elif not caption:
+    if not caption:
         # Fallback: if caption is empty, compose from title and description
         caption = f"{title}\n\n{description}".strip()
+    
+    # For Instagram, use caption as both title and description  
+    # (Instagram doesn't have separate title field)
+    final_title = title or caption[:100]
+    final_description = description or caption
     
     # Check if BraveBrowserManager is initialized (pipeline mode)
     manager = BraveBrowserManager.get_instance()
@@ -970,8 +973,8 @@ def upload_to_instagram(
         logger.info("Using shared browser context from BraveBrowserManager")
         return _upload_to_instagram_with_manager(
             video_path=video_path,
-            title=title or caption[:100],
-            description=description or caption,
+            title=final_title,
+            description=final_description,
             tags=tags
         )
     else:
@@ -979,8 +982,8 @@ def upload_to_instagram(
         logger.info("Using standalone browser mode")
         return upload_to_instagram_browser(
             video_path=video_path,
-            title=title or caption[:100],
-            description=description or caption,
+            title=final_title,
+            description=final_description,
             tags=tags,
             brave_path=brave_path,
             user_data_dir=user_data_dir,
