@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { GlassPanel, GlassPanelBody } from '../components/GlassPanel';
-import { GlowButton, SecondaryButton } from '../components/Buttons';
+import { SecondaryButton } from '../components/Buttons';
 import { TextInput, Radio, Toggle } from '../components/FormInputs';
-import { Upload, Folder, File } from 'lucide-react';
+import { Upload, Folder } from 'lucide-react';
 import './InputTab.css';
 
 const InputTab = () => {
@@ -10,7 +10,7 @@ const InputTab = () => {
   const [videoPath, setVideoPath] = useState('');
   const [outputDir, setOutputDir] = useState('output');
   const [useCache, setUseCache] = useState(true);
-  const [videoInfo, setVideoInfo] = useState(null);
+  const [videoInfo] = useState(null);
 
   const handleBrowse = () => {
     // In a real implementation, this would open a file dialog

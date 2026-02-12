@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { GlassPanel, GlassPanelBody } from '../components/GlassPanel';
-import { TextInput, TextArea, Select, Toggle } from '../components/FormInputs';
+import { TextInput } from '../components/FormInputs';
 import { GlowButton } from '../components/Buttons';
 import { Brain, Zap } from 'lucide-react';
 import api from '../services/api';
