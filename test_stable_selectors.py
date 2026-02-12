@@ -71,8 +71,12 @@ class TestInstagramStableSelectors(unittest.TestCase):
     
     def test_next_button_uses_role_selector(self):
         """Verify Next button uses div[role="button"] selector."""
-        self.assertIn('div[role="button"]:has-text("Next")', self.content,
-                     "Next button should use role-based selector")
+        # Check for the parameterized version (more flexible, handles both Next and Share)
+        self.assertIn('div[role="button"]:has-text("{button_text}")', self.content,
+                     "Next button should use role-based selector with button_text parameter")
+        # Verify documentation mentions Next button usage
+        self.assertIn('"Next"', self.content,
+                     "Documentation should mention Next button usage")
         
         # Also check for comment explaining it's React-heavy
         self.assertIn('Instagram is React-heavy', self.content,
@@ -89,8 +93,12 @@ class TestInstagramStableSelectors(unittest.TestCase):
     
     def test_share_button_uses_role_selector(self):
         """Verify Share button uses div[role="button"] selector."""
-        self.assertIn('div[role="button"]:has-text("Share")', self.content,
-                     "Share button should use role-based selector")
+        # Check for the parameterized version (more flexible, handles both Next and Share)
+        self.assertIn('div[role="button"]:has-text("{button_text}")', self.content,
+                     "Share button should use role-based selector with button_text parameter")
+        # Verify documentation mentions Share button usage
+        self.assertIn('"Share"', self.content,
+                     "Documentation should mention Share button usage")
     
     def test_file_upload_uses_input_type(self):
         """Verify file upload uses input[type="file"] directly."""

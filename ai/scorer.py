@@ -1,4 +1,4 @@
-"""AI highlight scoring using GitHub Models API."""
+"""Simplified AI highlight scoring using GitHub Models API only."""
 
 import os
 import json
@@ -11,6 +11,10 @@ from typing import List, Dict
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Score range constants
+FINAL_SCORE_MAX = 100.0
+COMPONENT_SCORE_MAX = 10.0
 
 # Try importing Azure AI Inference SDK
 try:
@@ -28,13 +32,34 @@ try:
 except ImportError:
     OPENAI_SDK_AVAILABLE = False
 
-# Try importing Ollama SDK
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    logger.info("Ollama SDK not available - will use remote APIs only")
+
+def validate_prompt(prompt: str, min_length: int = 10) -> tuple[bool, str | None]:
+    """
+    Validate a prompt before sending to LLM.
+    
+    Args:
+        prompt: The prompt text to validate
+        min_length: Minimum required prompt length
+        
+    Returns:
+        Tuple of (is_valid: bool, error_message: str or None)
+    """
+    if not prompt:
+        return False, "Prompt is empty"
+    
+    if not isinstance(prompt, str):
+        return False, f"Prompt must be a string, got {type(prompt)}"
+    
+    # Strip whitespace for validation
+    stripped = prompt.strip()
+    
+    if not stripped:
+        return False, "Prompt contains only whitespace"
+    
+    if len(stripped) < min_length:
+        return False, f"Prompt too short (min {min_length} chars, got {len(stripped)})"
+    
+    return True, None
 
 
 def extract_json_safe(text: str) -> dict:
@@ -64,7 +89,6 @@ def extract_json_safe(text: str) -> dict:
     text = re.sub(r'```\s*', '', text)
     
     # Try to find JSON object using brace counting for accuracy
-    # This ensures we get complete nested objects
     start_idx = text.find('{')
     if start_idx == -1:
         raise ValueError(f"No JSON object found in response: {text[:200]}")
@@ -101,265 +125,55 @@ def extract_json_safe(text: str) -> dict:
 
 def extract_score_safe(data: dict, field: str, default: float = 0.0) -> float:
     """
-    Safely extract a numeric score from parsed JSON.
-    
-    Handles multiple schema variations:
-    - Direct key: {"hook_score": 7}
-    - Nested: {"scores": {"hook_score": 7}}
-    - String numbers: {"hook_score": "7"}
-    
-    Individual scores are expected to be on a 0-10 scale.
-    The final_score field is expected to be on a 0-100 scale.
+    Safely extract and validate a numeric score from AI response.
     
     Args:
-        data: Parsed JSON dictionary
-        field: Field name to extract (e.g., "hook_score")
-        default: Default value if field not found (can be None for optional fields)
+        data: Parsed JSON response dictionary
+        field: Field name to extract (e.g., 'hook_score')
+        default: Default value if field missing or invalid
         
     Returns:
-        Numeric score as float, or default if not found/invalid
+        Float score value, clamped to valid range [0, 10] for component scores
     """
     try:
-        # Try direct access
-        if field in data:
-            value = data[field]
-            # Return None explicitly if the value is None and default is None
-            if value is None and default is None:
-                return None
-            return float(value)
+        value = data.get(field, default)
         
-        # Try nested in "scores"
-        if "scores" in data and isinstance(data["scores"], dict):
-            if field in data["scores"]:
-                return float(data["scores"][field])
+        # Convert to float
+        if isinstance(value, (int, float)):
+            score = float(value)
+        elif isinstance(value, str):
+            # Try to parse string numbers
+            score = float(value.strip())
+        else:
+            logger.warning(f"Invalid score type for '{field}': {type(value)}, using default {default}")
+            return default
         
-        # Try without underscore (e.g., "hookscore")
-        alt_field = field.replace("_", "")
-        if alt_field in data:
-            return float(data[alt_field])
-        
-        # Not found - return default
+        # Clamp to valid range for component scores (0-10)
+        # Note: final_score uses 0-100
+        if field == 'final_score':
+            return max(0.0, min(FINAL_SCORE_MAX, score))
+        else:
+            return max(0.0, min(COMPONENT_SCORE_MAX, score))
+            
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Failed to extract score for '{field}': {e}, using default {default}")
         return default
-        
-    except (ValueError, TypeError):
-        return default if default is not None else 0.0
-
 
 
 def load_prompt_template() -> str:
     """Load the scoring prompt template."""
     prompt_path = Path(__file__).parent / "prompt.txt"
     
-    if not prompt_path.exists():
-        raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
-    
-    with open(prompt_path, 'r', encoding='utf-8') as f:
-        return f.read()
-
-
-def check_ollama_availability(model_name: str = "qwen3:latest", timeout: float = 1.0, endpoint: str = "http://localhost:11434") -> tuple:
-    """
-    Check if Ollama is running and model is available.
-    
-    Uses the stable HTTP API (/api/tags) instead of the SDK for discovery.
-    Performs test inference to verify GPU/memory availability.
-    
-    Args:
-        model_name: Name of the Ollama model to check (e.g., "qwen3:8b")
-        timeout: Connection timeout in seconds
-        endpoint: Ollama endpoint URL
-        
-    Returns:
-        Tuple of (bool, str or None): (availability status, exact matched model name)
-        - (True, "qwen3:8b") if available and working
-        - (False, None) if unavailable or failed
-    """
     try:
-        # Use HTTP API for stable model discovery
-        # Normalize endpoint to ensure no trailing slash
-        normalized_endpoint = endpoint.rstrip('/')
-        tags_url = f"{normalized_endpoint}/api/tags"
-        response = requests.get(tags_url, timeout=timeout)
-        response.raise_for_status()
-        
-        # Parse JSON response - stable format: {"models": [...]}
-        data = response.json()
-        models_list = data.get("models", [])
-        
-        # Extract model names - handle both 'name' and 'model' fields
-        available_models = []
-        for m in models_list:
-            # Try both common field names
-            model_id = m.get('name') if m.get('name') is not None else m.get('model')
-            if model_id:
-                available_models.append(model_id)
-        
-        # Log all discovered models at DEBUG level
-        logger.debug(f"Ollama detected models: {available_models}")
-        
-        if not available_models:
-            logger.warning("Ollama is running but no models found")
-            return False, None
-        
-        # Normalize model names for comparison (case-insensitive)
-        model_name_normalized = model_name.lower().strip()
-        available_normalized = [m.lower().strip() for m in available_models]
-        
-        # Strategy 1: Exact match (preferred)
-        matched_model = None
-        for i, available in enumerate(available_normalized):
-            if available == model_name_normalized:
-                matched_model = available_models[i]
-                logger.info(f"Ollama is running with model: {matched_model} (exact match)")
-                break
-        
-        # Strategy 2: Base name match (e.g., "qwen3:8b" matches "qwen3:*")
-        if not matched_model:
-            model_base = model_name_normalized.split(':')[0]
-            for i, available in enumerate(available_normalized):
-                available_base = available.split(':')[0]
-                if available_base == model_base:
-                    matched_model = available_models[i]
-                    logger.info(f"Ollama is running with model: {matched_model} (base name match for '{model_name}')")
-                    break
-        
-        # No match found - log available models at INFO level for debugging
-        if not matched_model:
-            logger.warning(f"Ollama is running but model '{model_name}' not found.")
-            logger.info(f"Available models: {', '.join(available_models)}")
-            logger.info("[TIP] Check your config/model.yaml - local_model_name should match one of the above")
-            return False, None
-        
-        # Test inference to verify GPU/memory availability (if Ollama SDK is available)
-        if OLLAMA_AVAILABLE:
-            try:
-                logger.debug("Testing Ollama inference capability...")
-                client = ollama.Client(host=endpoint)
-                test_response = client.chat(
-                    model=matched_model,
-                    messages=[{"role": "user", "content": "test"}],
-                    stream=False,  # ✅ Critical: Disable streaming
-                    options={"num_predict": 10}  # Minimal tokens for test
-                )
-                # Verify response is not empty
-                MIN_TEST_RESPONSE_LENGTH = 10  # Minimum chars to consider valid response
-                content = test_response.get('message', {}).get('content', '')
-                if not content or len(content) < MIN_TEST_RESPONSE_LENGTH:
-                    logger.warning("Ollama test inference returned empty/invalid response")
-                    if "memory" in str(content).lower():
-                        logger.info("[TIP] Use CPU mode (OLLAMA_NO_GPU=1) or smaller model (qwen3:4b)")
-                    return False, None
-                
-                logger.info(f"[OK] Ollama model {matched_model} test inference successful")
-                return True, matched_model
-            except Exception as e:
-                error_msg = str(e).lower()
-                if "memory" in error_msg or "allocation" in error_msg or "vram" in error_msg:
-                    logger.warning(f"Ollama GPU memory error: {e}")
-                    logger.info("[TIP] Consider using CPU-only mode (OLLAMA_NO_GPU=1) or smaller model")
-                else:
-                    logger.warning(f"Ollama test inference failed: {e}")
-                return False, None
-        else:
-            # If SDK not available, just return that model exists (fallback behavior)
-            logger.info(f"Ollama SDK not available, skipping test inference")
-            return True, matched_model
-        
-    except requests.exceptions.ConnectionError as e:
-        logger.debug(f"Ollama connection failed: {e}")
-        return False, None
-    except requests.exceptions.Timeout as e:
-        logger.debug(f"Ollama connection timeout: {e}")
-        return False, None
-    except requests.exceptions.HTTPError as e:
-        # Handles HTTP status errors (non-200 status codes)
-        logger.warning(f"Ollama HTTP error: {e}")
-        return False, None
-    except (ValueError, requests.exceptions.JSONDecodeError) as e:
-        # Handle invalid JSON response
-        logger.warning(f"Ollama returned invalid JSON response: {e}")
-        return False, None
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            template = f.read()
+        return template
+    except FileNotFoundError:
+        logger.error(f"Prompt template not found at: {prompt_path}")
+        raise
     except Exception as e:
-        logger.warning(f"Ollama availability check failed: {e}")
-        logger.debug("Full error details:", exc_info=True)
-        return False, None
-
-
-def score_with_ollama(
-    segment: Dict,
-    prompt: str,
-    model_name: str = "qwen3:latest",
-    temperature: float = 0.2,
-    endpoint: str = "http://localhost:11434",
-    keep_alive: str = "5m"
-) -> Dict:
-    """
-    Score a segment using local Ollama model.
-    
-    Args:
-        segment: Segment data
-        prompt: Formatted prompt
-        model_name: Ollama model name (exact name from /api/tags)
-        temperature: Temperature for generation
-        endpoint: Ollama endpoint URL
-        keep_alive: How long to keep model in memory (e.g., "5m", "10m", "-1" for indefinite)
-        
-    Returns:
-        Parsed AI analysis dictionary
-        
-    Raises:
-        Exception: If Ollama call fails or SDK is not available
-    """
-    if not OLLAMA_AVAILABLE:
-        raise RuntimeError("Ollama SDK not available. Install ollama package for local inference.")
-    
-    client = ollama.Client(host=endpoint)
-    
-    # Strengthened system prompt for JSON-only responses
-    system_prompt = """You are a video content analyzer.
-
-CRITICAL RESPONSE FORMAT:
-1. Your response MUST be ONLY valid JSON
-2. Start IMMEDIATELY with { character
-3. End with } character
-4. NO markdown, NO explanations, NO code blocks
-5. NO text before or after the JSON object
-
-Example of CORRECT response:
-{"hook_score": 7, "retention_score": 6, ...}
-
-Example of INCORRECT response:
-Here's the analysis: ```json{"hook_score": 7}```"""
-    
-    # Call Ollama API with critical parameters
-    response = client.chat(
-        model=model_name,
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        stream=False,  # ✅ CRITICAL: Disable streaming for complete responses
-        options={
-            "temperature": temperature,
-            "num_predict": 1024  # Max tokens
-        },
-        format="json",  # ✅ Hint to model for JSON output
-        keep_alive=keep_alive  # ✅ Keep model in memory to reduce reload times
-    )
-    
-    # Extract response
-    ai_response = response['message']['content']
-    
-    # Parse JSON
-    ai_analysis = extract_json_safe(ai_response)
-    
-    return ai_analysis
+        logger.error(f"Failed to load prompt template: {e}")
+        raise
 
 
 def create_batch_prompt(segments: List[Dict], prompt_template: str) -> str:
@@ -367,41 +181,39 @@ def create_batch_prompt(segments: List[Dict], prompt_template: str) -> str:
     Create a batch scoring prompt for multiple segments.
     
     Args:
-        segments: List of segments to score together (batch size is configurable)
-        prompt_template: Base template
+        segments: List of segments to score together
+        prompt_template: Base prompt template
         
     Returns:
-        Formatted batch prompt
+        Formatted batch prompt string
     """
-    batch_data = []
-    for i, seg in enumerate(segments):
-        batch_data.append({
-            "id": i + 1,
-            "text": seg["text"],
-            "duration": seg["duration"]
-        })
+    # Build segment list for batch prompt
+    segments_list = []
+    for i, seg in enumerate(segments, 1):
+        segments_list.append(f"\n\n━━━ SEGMENT {i} ━━━\n")
+        segments_list.append(f"Text: {seg['text']}\n")
+        segments_list.append(f"Duration: {seg['duration']:.1f}s\n")
+    segments_text = ''.join(segments_list)
     
-    batch_prompt = f"""
-Score the following {len(segments)} video segments. Return a JSON array with results for each.
-
-Segments:
-{json.dumps(batch_data, indent=2)}
+    batch_prompt = f"""Score the following {len(segments)} video segments using the criteria below.
 
 {prompt_template}
 
-Return format:
+{segments_text}
+
+Return JSON with array of scores:
 {{
-  "results": [
+  "segments": [
     {{
-      "id": 1,
-      "hook_score": 7,
-      "retention_score": 6,
-      "emotion_score": 5,
-      "relatability_score": 4,
-      "completion_score": 6,
-      "platform_fit_score": 5,
-      "final_score": 60,
-      "verdict": "maybe",
+      "segment_id": 1,
+      "hook_score": <0-10>,
+      "retention_score": <0-10>,
+      "emotion_score": <0-10>,
+      "relatability_score": <0-10>,
+      "completion_score": <0-10>,
+      "platform_fit_score": <0-10>,
+      "final_score": <0-100>,
+      "verdict": "viral|maybe|skip",
       "key_strengths": ["strength 1", "strength 2"],
       "key_weaknesses": ["weakness 1"],
       "first_3_seconds": "exact quote from first 3 seconds",
@@ -417,207 +229,138 @@ Return format:
 
 def pre_filter_candidates(candidates: List[Dict], max_count: int = 20) -> List[Dict]:
     """
-    Pre-filter candidates using heuristics before AI scoring.
+    Pre-filter candidates using heuristic scoring before AI analysis.
     
-    Criteria:
-    - Duration: 20-60 seconds
-    - High pause density (natural breaks)
-    - Emotional keywords
-    - Sentence density (engagement)
+    Simple heuristics based on:
+    - Position in video (earlier = better)
+    - Duration (30-60s sweet spot for shorts)
+    - Word count (substantive content)
     
     Args:
-        candidates: All candidate segments
-        max_count: Maximum to return
+        candidates: List of candidate segments
+        max_count: Maximum candidates to keep
         
     Returns:
-        Filtered candidates most likely to be viral
+        Filtered and sorted list of candidates
     """
-    EMOTIONAL_KEYWORDS = [
-        'never', 'always', 'nobody', 'everyone', 'shocked', 'crazy', 
-        'insane', 'ruined', 'destroyed', 'unbelievable', 'secret', 
-        'truth', 'lie', 'wrong', 'right', 'mistake', 'regret'
-    ]
+    if len(candidates) <= max_count:
+        return candidates
     
-    scored_candidates = []
-    
+    # Score each candidate
     for candidate in candidates:
-        heuristic_score = 0.0
-        text = candidate.get('text', '').lower()
+        score = 0.0
+        
+        # Position score (earlier segments often better)
+        start_time = candidate.get('start', 0)
+        if start_time < 300:  # First 5 minutes
+            score += 2.0
+        elif start_time < 600:  # First 10 minutes
+            score += 1.0
+        
+        # Duration score (sweet spot: 30-60s)
         duration = candidate.get('duration', 0)
+        if 30 <= duration <= 60:
+            score += 3.0
+        elif 20 <= duration <= 70:
+            score += 2.0
+        elif 15 <= duration <= 80:
+            score += 1.0
         
-        # Duration check (20-60s ideal)
-        if 20 <= duration <= 60:
-            heuristic_score += 3.0
-        elif 15 <= duration <= 75:
-            heuristic_score += 1.5
+        # Word count score (substantive content)
+        word_count = len(candidate.get('text', '').split())
+        if word_count >= 50:
+            score += 2.0
+        elif word_count >= 30:
+            score += 1.0
         
-        # Emotional keywords
-        keyword_count = sum(1 for kw in EMOTIONAL_KEYWORDS if kw in text)
-        heuristic_score += min(keyword_count * 0.5, 3.0)
-        
-        # Sentence density (engagement indicator)
-        sentences = text.count('.') + text.count('!') + text.count('?')
-        if duration > 0:
-            sentence_density = sentences / (duration / 10)  # Sentences per 10s
-            heuristic_score += min(sentence_density * 0.8, 2.0)
-        
-        # Pause density (from metadata if available)
-        pause_density = candidate.get('pause_density', 0)
-        heuristic_score += min(pause_density * 2.0, 2.0)
-        
-        scored_candidates.append({
-            **candidate,
-            'heuristic_score': heuristic_score
-        })
+        candidate['heuristic_score'] = score
     
-    # Sort by heuristic score and return top N
-    scored_candidates.sort(key=lambda x: x['heuristic_score'], reverse=True)
-    return scored_candidates[:max_count]
-
-
-def save_pipeline_state(scored_segments: List[Dict], remaining_segments: List[Dict], output_path: str = "state/pipeline_state.json"):
-    """Save pipeline state when rate limited."""
-    import os
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
-    state = {
-        'timestamp': time.time(),
-        'scored_segments': scored_segments,
-        'remaining_segments': remaining_segments,
-        'reason': 'rate_limit_exceeded'
-    }
-    
-    with open(output_path, 'w') as f:
-        json.dump(state, f, indent=2)
-    
-    logger.info(f"Pipeline state saved to {output_path}")
-
-
-def extract_retry_after(api_error) -> int:
-    """
-    Extract retry-after value from API error response.
-    
-    Args:
-        api_error: Exception from API call
-        
-    Returns:
-        Retry-after value in seconds, or None if not found
-    """
-    retry_after = None
-    
-    # Try to get from response headers (standard HTTP header)
-    if hasattr(api_error, 'response') and hasattr(api_error.response, 'headers'):
-        retry_after_header = api_error.response.headers.get('retry-after') or \
-                           api_error.response.headers.get('Retry-After')
-        if retry_after_header:
-            try:
-                retry_after = int(retry_after_header)
-            except (ValueError, TypeError):
-                pass
-    
-    # Fallback: try direct attribute (some SDKs may expose it directly)
-    if retry_after is None:
-        retry_after = getattr(api_error, 'retry_after', None)
-    
-    return retry_after
+    # Sort by heuristic score and take top candidates
+    candidates_sorted = sorted(candidates, key=lambda x: x.get('heuristic_score', 0), reverse=True)
+    return candidates_sorted[:max_count]
 
 
 def process_single_segment_response(segment: Dict, ai_analysis: Dict, idx: int) -> Dict:
     """
-    Process AI analysis for a single segment and create scored segment.
+    Process a single segment's AI analysis and create scored segment.
     
     Args:
         segment: Original segment data
         ai_analysis: Parsed AI response
-        idx: Segment index for logging
+        idx: Segment index
         
     Returns:
-        Scored segment dictionary
+        Scored segment with all fields
     """
     try:
-        # Extract scores safely with fallbacks
-        hook_score = extract_score_safe(ai_analysis, "hook_score", 0.0)
-        retention_score = extract_score_safe(ai_analysis, "retention_score", 0.0)
-        emotion_score = extract_score_safe(ai_analysis, "emotion_score", 0.0)
-        relatability_score = extract_score_safe(ai_analysis, "relatability_score", 0.0)
-        completion_score = extract_score_safe(ai_analysis, "completion_score", 0.0)
-        platform_fit_score = extract_score_safe(ai_analysis, "platform_fit_score", 0.0)
+        # Extract scores with defaults
+        hook_score = extract_score_safe(ai_analysis, 'hook_score', 0.0)
+        retention_score = extract_score_safe(ai_analysis, 'retention_score', 0.0)
+        emotion_score = extract_score_safe(ai_analysis, 'emotion_score', 0.0)
+        relatability_score = extract_score_safe(ai_analysis, 'relatability_score', 0.0)
+        completion_score = extract_score_safe(ai_analysis, 'completion_score', 0.0)
+        platform_fit_score = extract_score_safe(ai_analysis, 'platform_fit_score', 0.0)
+        final_score = extract_score_safe(ai_analysis, 'final_score', 0.0)
         
-        # Extract final score with fallback calculation
-        final_score = extract_score_safe(ai_analysis, "final_score", None)
+        # Extract other fields
+        verdict = ai_analysis.get('verdict', 'skip')
+        key_strengths = ai_analysis.get('key_strengths', [])
+        key_weaknesses = ai_analysis.get('key_weaknesses', [])
+        first_3_seconds = ai_analysis.get('first_3_seconds', '')
+        primary_emotion = ai_analysis.get('primary_emotion', 'neutral')
+        optimal_platform = ai_analysis.get('optimal_platform', 'none')
         
-        # If final_score not provided, calculate weighted average
-        if final_score is None:
-            final_score = (
-                hook_score * 0.35 +
-                retention_score * 0.25 +
-                emotion_score * 0.20 +
-                completion_score * 0.10 +
-                platform_fit_score * 0.05 +
-                relatability_score * 0.05
-            ) * 10.0  # Scale from 0-10 to 0-100
-        
-        # Convert final_score (0-100) to overall_score (0-10)
-        overall_score = final_score / 10.0
-        verdict = ai_analysis.get("verdict", "skip")
-        
+        # Create scored segment
         scored_segment = {
-            **segment,
-            "ai_analysis": ai_analysis,
-            "overall_score": overall_score,
-            "hook_score": hook_score,
-            "retention_score": retention_score,
-            "emotion_score": emotion_score,
-            "relatability_score": relatability_score,
-            "completion_score": completion_score,
-            "platform_fit_score": platform_fit_score,
-            "final_score": final_score,
-            "verdict": verdict,
-            "key_strengths": ai_analysis.get("key_strengths", []),
-            "key_weaknesses": ai_analysis.get("key_weaknesses", []),
-            "first_3_seconds": ai_analysis.get("first_3_seconds", ""),
-            "primary_emotion": ai_analysis.get("primary_emotion", "neutral"),
-            "optimal_platform": ai_analysis.get("optimal_platform", "none")
+            **segment,  # Include all original segment data
+            'hook_score': hook_score,
+            'retention_score': retention_score,
+            'emotion_score': emotion_score,
+            'relatability_score': relatability_score,
+            'completion_score': completion_score,
+            'platform_fit_score': platform_fit_score,
+            'final_score': final_score,
+            'verdict': verdict,
+            'key_strengths': key_strengths,
+            'key_weaknesses': key_weaknesses,
+            'first_3_seconds': first_3_seconds,
+            'primary_emotion': primary_emotion,
+            'optimal_platform': optimal_platform
         }
         
-        logger.info(f"[OK] Segment {idx + 1}: final_score={final_score:.1f}/100, verdict={verdict}")
+        logger.info(f"Segment {idx + 1}: score={final_score:.1f}, verdict={verdict}")
         return scored_segment
         
     except Exception as e:
-        logger.error(f"Failed to process segment {idx + 1} response: {e}")
+        logger.error(f"Error processing segment {idx + 1} response: {e}")
         return create_fallback_segment(segment)
 
 
 def create_fallback_segment(segment: Dict) -> Dict:
     """
-    Create a fallback segment with zero scores when AI analysis fails.
+    Create a fallback scored segment with default values when AI scoring fails.
     
     Args:
         segment: Original segment data
         
     Returns:
-        Segment with default scores
+        Segment with default/zero scores
     """
     return {
         **segment,
-        "ai_analysis": {
-            "error": "AI analysis failed",
-            "final_score": 0
-        },
-        "overall_score": 0.0,
-        "final_score": 0,
-        "verdict": "skip",
-        "hook_score": 0,
-        "retention_score": 0,
-        "emotion_score": 0,
-        "relatability_score": 0,
-        "completion_score": 0,
-        "platform_fit_score": 0,
-        "key_strengths": [],
-        "key_weaknesses": ["AI analysis failed"],
-        "first_3_seconds": "",
-        "primary_emotion": "neutral",
-        "optimal_platform": "none"
+        'hook_score': 0.0,
+        'retention_score': 0.0,
+        'emotion_score': 0.0,
+        'relatability_score': 0.0,
+        'completion_score': 0.0,
+        'platform_fit_score': 0.0,
+        'final_score': 0.0,
+        'verdict': 'skip',
+        'key_strengths': [],
+        'key_weaknesses': ['AI scoring failed'],
+        'first_3_seconds': '',
+        'primary_emotion': 'neutral',
+        'optimal_platform': 'none'
     }
 
 
@@ -632,7 +375,7 @@ def score_segments(
     Args:
         candidates: List of candidate segment dictionaries
         model_config: Model configuration (endpoint, model_name, api_key)
-        max_segments: Maximum number of segments to score (top candidates first)
+        max_segments: Maximum number of segments to score
         
     Returns:
         List of scored segments with AI analysis
@@ -641,10 +384,11 @@ def score_segments(
         logger.warning("No candidate segments to score")
         return []
     
-    # Get API credentials from config or environment
+    # Get API credentials
     endpoint = model_config.get("endpoint") or os.getenv("GITHUB_MODELS_ENDPOINT")
     api_key = model_config.get("api_key") or os.getenv("GITHUB_TOKEN")
     model_name = model_config.get("model_name", "gpt-4o")
+    temperature = model_config.get("temperature", 0.2)
     
     if not endpoint:
         endpoint = "https://models.inference.ai.azure.com"
@@ -652,113 +396,48 @@ def score_segments(
     if not api_key:
         raise ValueError("GitHub API token not provided. Set GITHUB_TOKEN environment variable.")
     
-    logger.info(f"Scoring {min(len(candidates), max_segments)} segments using {model_name}")
+    logger.info(f"Using GitHub Models API: {model_name}")
+    logger.info(f"Scoring {min(len(candidates), max_segments)} segments")
     
     # Load prompt template
     prompt_template = load_prompt_template()
     
-    # Backend selection configuration
-    llm_backend = model_config.get("llm_backend", "auto")  # auto | local | api
-    local_model_name = model_config.get("local_model_name", "qwen3:latest")
-    local_endpoint = model_config.get("local_endpoint", "http://localhost:11434")
-    temperature = model_config.get("temperature", 0.2)  # Use from config
-    local_keep_alive = model_config.get("local_keep_alive", "5m")  # Memory management
-    
-    # Determine if we should try local model
-    ollama_available = False
-    exact_model_name = None  # Store exact matched model name
-    
-    if llm_backend == "api":
-        logger.info("Backend: API only (local disabled by config)")
-    elif llm_backend in ["auto", "local"]:
-        # Check Ollama availability - returns (bool, exact_model_name)
-        ollama_available, exact_model_name = check_ollama_availability(local_model_name, endpoint=local_endpoint)
-        
-        if ollama_available:
-            logger.info(f"Ollama is running with model: {exact_model_name}")
-        else:
-            if llm_backend == "local":
-                logger.warning("Backend: LOCAL required but Ollama unavailable - falling back to API")
-            else:  # auto
-                logger.info("Backend: AUTO - Ollama unavailable, using API")
-    else:
-        logger.warning(f"Unknown llm_backend '{llm_backend}', defaulting to 'auto'")
-        ollama_available, exact_model_name = check_ollama_availability(local_model_name, endpoint=local_endpoint)
-        if ollama_available:
-            logger.info(f"Ollama is running with model: {exact_model_name}")
-        else:
-            logger.info("Backend: AUTO - Ollama unavailable, using API")
-    
-    # Pre-filter candidates using heuristics
+    # Pre-filter candidates
     pre_filter_count = model_config.get('pre_filter_count', 20)
-    logger.info(f"Pre-filtering {len(candidates)} candidates using heuristics")
+    logger.info(f"Pre-filtering {len(candidates)} candidates")
     candidates = pre_filter_candidates(candidates, max_count=pre_filter_count)
-    logger.info(f"After pre-filtering: {len(candidates)} candidates remain")
+    logger.info(f"After pre-filtering: {len(candidates)} candidates")
     
-    # Limit to max_segments (score best candidates based on duration and position)
+    # Limit to max_segments
     segments_to_score = candidates[:max_segments] if len(candidates) > max_segments else candidates
     
-    scored_segments = []
-    
-    # Determine effective batch size based on backend
-    # Ollama doesn't support batching, so we force single-segment processing
-    BATCH_SIZE = model_config.get('batch_size', 6)  # Get configured batch size
-    
-    if ollama_available:
-        effective_batch_size = 1  # Force single-segment processing for Ollama
-        logger.info("[LOCAL] Ollama processes one segment at a time (no batching)")
-        logger.info(f"Backend: Local LLM (Ollama)")
-        logger.info(f"Will score {len(segments_to_score)} segments using LOCAL Ollama with keep_alive={local_keep_alive}")
-    else:
-        effective_batch_size = BATCH_SIZE
-        logger.info(f"[API] Batch processing enabled (batch_size={effective_batch_size})")
-        logger.info(f"Will score {len(segments_to_score)} segments using API ({effective_batch_size} per batch)")
-    
-    # Initialize AI client only when needed (not for pure local mode)
+    # Initialize API client
     client = None
     
-    # Only initialize API client if we're NOT in pure local mode OR if in auto mode (for fallback)
-    should_init_api_client = (
-        (llm_backend == "api") or 
-        (llm_backend == "auto" and not ollama_available)
-    )
+    if AZURE_SDK_AVAILABLE:
+        try:
+            client = ChatCompletionsClient(
+                endpoint=endpoint,
+                credential=AzureKeyCredential(api_key)
+            )
+            logger.info("Using Azure AI Inference SDK")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Azure SDK: {e}")
     
-    # Special case: local mode requested but Ollama unavailable
-    if llm_backend == "local" and not ollama_available:
-        logger.error("Local LLM mode requested but Ollama is unavailable")
-        logger.error("Please ensure Ollama is running and model is available")
-        logger.info("To use API instead, change llm_backend to 'auto' or 'api' in config/model.yaml")
-        raise RuntimeError("Local LLM mode requested but Ollama unavailable. Set llm_backend='auto' for fallback.")
+    if client is None and OPENAI_SDK_AVAILABLE:
+        try:
+            client = OpenAI(
+                base_url=endpoint,
+                api_key=api_key
+            )
+            logger.info("Using OpenAI SDK")
+        except Exception as e:
+            logger.warning(f"Failed to initialize OpenAI SDK: {e}")
     
-    if should_init_api_client:
-        if AZURE_SDK_AVAILABLE:
-            try:
-                client = ChatCompletionsClient(
-                    endpoint=endpoint,
-                    credential=AzureKeyCredential(api_key)
-                )
-                logger.info("Using Azure AI Inference SDK")
-            except Exception as e:
-                logger.warning(f"Failed to initialize Azure SDK: {e}")
-        
-        if client is None and OPENAI_SDK_AVAILABLE:
-            try:
-                client = OpenAI(
-                    base_url=endpoint,
-                    api_key=api_key
-                )
-                logger.info("Using OpenAI SDK")
-            except Exception as e:
-                logger.warning(f"Failed to initialize OpenAI SDK: {e}")
-        
-        if client is None:
-            if ollama_available and llm_backend == "auto":
-                # Fallback to local is OK in auto mode
-                logger.info("API client initialization failed, will use local Ollama")
-            else:
-                raise RuntimeError("No compatible SDK available. Install azure-ai-inference or openai.")
+    if client is None:
+        raise RuntimeError("No compatible SDK available. Install azure-ai-inference or openai.")
     
-    # Define system message once (used for all segments)
+    # System message
     system_message = """You are a video content analyzer. 
 
 CRITICAL: You MUST respond with ONLY valid JSON. 
@@ -766,480 +445,203 @@ CRITICAL: You MUST respond with ONLY valid JSON.
 - Do NOT include any text before or after the JSON
 - Start directly with { and end with }"""
     
-    # API usage tracking
-    api_calls_made = 0
-    tokens_used = 0
-    
-    # Circuit breaker for local LLM failures (Issue 7)
-    CIRCUIT_BREAKER_THRESHOLD = model_config.get('circuit_breaker_threshold', 3)
-    local_failure_count = 0
-    consecutive_memory_errors = 0
-    MAX_MEMORY_ERRORS = 3
-    
-    # Get other config
+    # Configuration
+    batch_size = model_config.get('batch_size', 6)
     inter_request_delay = model_config.get('inter_request_delay', 1.5)
     max_cooldown_threshold = model_config.get('max_cooldown_threshold', 60)
     
-    # Process segments with effective batch size
-    for batch_start in range(0, len(segments_to_score), effective_batch_size):
-        batch_end = min(batch_start + effective_batch_size, len(segments_to_score))
+    scored_segments = []
+    api_calls_made = 0
+    tokens_used = 0
+    
+    # Process segments in batches
+    for batch_start in range(0, len(segments_to_score), batch_size):
+        batch_end = min(batch_start + batch_size, len(segments_to_score))
         batch_segments = segments_to_score[batch_start:batch_end]
         
-        # Separate Ollama path from API path
-        if ollama_available and local_failure_count < CIRCUIT_BREAKER_THRESHOLD:
-            # Process with Ollama (one segment at a time)
-            for i, segment in enumerate(batch_segments):
-                idx = batch_start + i
+        if len(batch_segments) == 1:
+            # Single segment processing
+            segment = batch_segments[0]
+            idx = batch_start
+            
+            try:
+                # Format prompt
+                prompt = (
+                    prompt_template
+                    .replace("{{SEGMENT_TEXT}}", segment["text"])
+                    .replace("{{DURATION}}", f"{segment['duration']:.1f}")
+                )
                 
-                try:
-                    # Format prompt with segment data using token replacement
-                    prompt = (
-                        prompt_template
-                        .replace("{{SEGMENT_TEXT}}", segment["text"])
-                        .replace("{{DURATION}}", f"{segment['duration']:.1f}")
-                    )
-                    
-                    ai_analysis = None
-                    
-                    # Try local model
+                # Validate prompt
+                is_valid, error_msg = validate_prompt(prompt)
+                if not is_valid:
+                    logger.error(f"Invalid prompt for segment {idx + 1}: {error_msg}")
+                    scored_segments.append(create_fallback_segment(segment))
+                    continue
+                
+                # Call API with retry
+                ai_response = None
+                max_retries = 3
+                
+                for attempt in range(max_retries + 1):
                     try:
-                        ai_analysis = score_with_ollama(
-                            segment=segment,
-                            prompt=prompt,
-                            model_name=exact_model_name,  # Use exact matched model name
-                            temperature=temperature,
-                            endpoint=local_endpoint,
-                            keep_alive=local_keep_alive  # Memory management
-                        )
-                        logger.debug(f"Segment {idx + 1}/{len(segments_to_score)}: scored with LOCAL Ollama [OK]")
-                        
-                        # Reset failure counters on success
-                        local_failure_count = 0
-                        consecutive_memory_errors = 0
-                        
-                    except Exception as local_error:
-                        local_failure_count += 1
-                        error_str = str(local_error).lower()
-                        
-                        # Check for memory errors
-                        if "memory" in error_str or "allocation" in error_str:
-                            consecutive_memory_errors += 1
-                            logger.warning(f"Local LLM memory error ({consecutive_memory_errors}/{MAX_MEMORY_ERRORS}): {local_error}")
+                        if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
+                            response = client.complete(
+                                messages=[
+                                    {"role": "system", "content": system_message},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                model=model_name,
+                                temperature=temperature,
+                                max_tokens=1024,
+                                response_format={"type": "json_object"}
+                            )
+                            ai_response = response.choices[0].message.content
                             
-                            if consecutive_memory_errors >= MAX_MEMORY_ERRORS:
-                                logger.error("[CIRCUIT BREAKER] Persistent memory errors - disabling local LLM")
-                                logger.info("[TIP] Use CPU mode: set OLLAMA_NO_GPU=1 or try smaller model")
-                                ollama_available = False
-                                local_failure_count = CIRCUIT_BREAKER_THRESHOLD  # Force circuit break
+                            if hasattr(response, 'usage'):
+                                tokens_used += response.usage.total_tokens
+                            
+                        else:  # OpenAI SDK
+                            response = client.chat.completions.create(
+                                model=model_name,
+                                messages=[
+                                    {"role": "system", "content": system_message},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=temperature,
+                                max_tokens=1024,
+                                response_format={"type": "json_object"}
+                            )
+                            ai_response = response.choices[0].message.content
+                            
+                            if hasattr(response, 'usage'):
+                                tokens_used += response.usage.total_tokens
+                        
+                        api_calls_made += 1
+                        break
+                        
+                    except Exception as api_error:
+                        if attempt < max_retries:
+                            backoff = min(60, (2 ** attempt) + random.uniform(0, 1))
+                            logger.warning(f"API call failed, retrying in {backoff:.1f}s... ({api_error})")
+                            time.sleep(backoff)
                         else:
-                            logger.warning(f"Local LLM failed ({local_failure_count}/{CIRCUIT_BREAKER_THRESHOLD}): {local_error}")
-                        
-                        # Check circuit breaker threshold
-                        if local_failure_count >= CIRCUIT_BREAKER_THRESHOLD:
-                            logger.error(f"[CIRCUIT BREAKER] Disabling local LLM after {local_failure_count} failures")
-                            ollama_available = False
-                        
-                        # Fallback to API if auto mode and client available
-                        if llm_backend == "auto" and client is not None:
-                            logger.info("Falling back to remote API")
-                            ai_response = None
-                            api_call_succeeded = False
-                            max_retries = 3
-                            
-                            for attempt in range(max_retries + 1):
-                                try:
-                                    if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
-                                        response = client.complete(
-                                            messages=[
-                                                {"role": "system", "content": system_message},
-                                                {"role": "user", "content": prompt}
-                                            ],
-                                            model=model_name,
-                                            temperature=temperature,
-                                            max_tokens=1024,
-                                            response_format={"type": "json_object"}
-                                        )
-                                        ai_response = response.choices[0].message.content
-                                        
-                                        # Track token usage
-                                        if hasattr(response, 'usage'):
-                                            tokens_used += response.usage.total_tokens
-                                        
-                                    else:  # OpenAI SDK
-                                        response = client.chat.completions.create(
-                                            model=model_name,
-                                            messages=[
-                                                {"role": "system", "content": system_message},
-                                                {"role": "user", "content": prompt}
-                                            ],
-                                            temperature=temperature,
-                                            max_tokens=1024,
-                                            response_format={"type": "json_object"}
-                                        )
-                                        ai_response = response.choices[0].message.content
-                                        
-                                        # Track token usage
-                                        if hasattr(response, 'usage'):
-                                            tokens_used += response.usage.total_tokens
-                                    
-                                    api_call_succeeded = True
-                                    break
-                                    
-                                except Exception as api_error:
-                                    # Check for rate limiting (429)
-                                    is_rate_limit = False
-                                    retry_after = None
-                                    
-                                    if hasattr(api_error, 'status_code') and api_error.status_code == 429:
-                                        is_rate_limit = True
-                                        # Try to extract retry-after
-                                        if hasattr(api_error, 'response') and hasattr(api_error.response, 'headers'):
-                                            retry_after = api_error.response.headers.get('retry-after')
-                                            if retry_after:
-                                                retry_after = int(retry_after)
-                                    
-                                    if is_rate_limit and retry_after and retry_after > 60:
-                                        logger.error(f"Rate limit with long cooldown ({retry_after}s). Stopping.")
-                                        raise RuntimeError(f"Rate limit exceeded: retry after {retry_after}s")
-                                    
-                                    if attempt < max_retries:
-                                        # Exponential backoff with jitter
-                                        if is_rate_limit and retry_after:
-                                            backoff = retry_after + random.uniform(1, 5)
-                                        else:
-                                            backoff = min(60, (2 ** attempt) + random.uniform(0, 1))
-                                        
-                                        logger.warning(f"API call failed for segment {idx + 1}, retrying in {backoff:.1f}s... ({api_error})")
-                                        time.sleep(backoff)
-                                    else:
-                                        logger.error(f"API call failed for segment {idx + 1} after {max_retries + 1} attempts: {api_error}")
-                                        raise
-                            
-                            if api_call_succeeded and ai_response is not None:
-                                # Parse API response
-                                try:
-                                    ai_analysis = extract_json_safe(ai_response)
-                                    logger.debug(f"Segment {idx + 1}: scored with API (fallback)")
-                                except ValueError as e:
-                                    logger.warning(f"Failed to parse API response for segment {idx + 1}: {e}")
-                                    raise
-                        else:
-                            # No fallback available
+                            logger.error(f"API call failed after {max_retries + 1} attempts: {api_error}")
                             raise
-                    
-                    # Process the segment response
-                    if ai_analysis is not None:
+                
+                if ai_response is None:
+                    raise RuntimeError("API call failed")
+                
+                # Parse response
+                ai_analysis = extract_json_safe(ai_response)
+                scored_segment = process_single_segment_response(segment, ai_analysis, idx)
+                scored_segments.append(scored_segment)
+                
+                # Delay between requests
+                if idx < len(segments_to_score) - 1:
+                    time.sleep(inter_request_delay)
+                
+            except Exception as e:
+                logger.error(f"Failed to score segment {idx + 1}: {e}")
+                scored_segments.append(create_fallback_segment(segment))
+        
+        else:
+            # Batch processing
+            try:
+                batch_prompt = create_batch_prompt(batch_segments, prompt_template)
+                
+                # Validate prompt
+                is_valid, error_msg = validate_prompt(batch_prompt)
+                if not is_valid:
+                    logger.error(f"Invalid batch prompt: {error_msg}")
+                    for segment in batch_segments:
+                        scored_segments.append(create_fallback_segment(segment))
+                    continue
+                
+                # Call API with retry
+                ai_response = None
+                max_retries = 1
+                
+                for attempt in range(max_retries + 1):
+                    try:
+                        if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
+                            response = client.complete(
+                                messages=[
+                                    {"role": "system", "content": system_message},
+                                    {"role": "user", "content": batch_prompt}
+                                ],
+                                model=model_name,
+                                temperature=temperature,
+                                max_tokens=4096,
+                                response_format={"type": "json_object"}
+                            )
+                            ai_response = response.choices[0].message.content
+                            
+                            if hasattr(response, 'usage'):
+                                tokens_used += response.usage.total_tokens
+                        
+                        else:  # OpenAI SDK
+                            response = client.chat.completions.create(
+                                model=model_name,
+                                messages=[
+                                    {"role": "system", "content": system_message},
+                                    {"role": "user", "content": batch_prompt}
+                                ],
+                                temperature=temperature,
+                                max_tokens=4096,
+                                response_format={"type": "json_object"}
+                            )
+                            ai_response = response.choices[0].message.content
+                            
+                            if hasattr(response, 'usage'):
+                                tokens_used += response.usage.total_tokens
+                        
+                        api_calls_made += 1
+                        break
+                        
+                    except Exception as api_error:
+                        if attempt < max_retries:
+                            backoff = min(60, (2 ** attempt) + random.uniform(0, 1))
+                            logger.warning(f"Batch API call failed, retrying in {backoff:.1f}s...")
+                            time.sleep(backoff)
+                        else:
+                            logger.error(f"Batch API call failed: {api_error}")
+                            raise
+                
+                if ai_response is None:
+                    raise RuntimeError("Batch API call failed")
+                
+                # Parse batch response
+                batch_data = extract_json_safe(ai_response)
+                segments_data = batch_data.get('segments', [])
+                
+                if len(segments_data) != len(batch_segments):
+                    logger.warning(f"Batch response count mismatch: expected {len(batch_segments)}, got {len(segments_data)}")
+                
+                # Process each segment in batch
+                for i, segment in enumerate(batch_segments):
+                    idx = batch_start + i
+                    if i < len(segments_data):
+                        ai_analysis = segments_data[i]
                         scored_segment = process_single_segment_response(segment, ai_analysis, idx)
                         scored_segments.append(scored_segment)
                     else:
                         scored_segments.append(create_fallback_segment(segment))
-                    
-                except Exception as e:
-                    logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
+                
+                # Delay between batches
+                if batch_end < len(segments_to_score):
+                    time.sleep(inter_request_delay)
+                
+            except Exception as e:
+                logger.error(f"Failed to score batch: {e}")
+                for segment in batch_segments:
                     scored_segments.append(create_fallback_segment(segment))
-        
-        else:
-            # Process with API (batched or when local unavailable/circuit broken)
-            # Initialize API client on-demand if not yet initialized (for circuit breaker case)
-            if client is None:
-                logger.info("Initializing API client for fallback...")
-                if AZURE_SDK_AVAILABLE:
-                    try:
-                        client = ChatCompletionsClient(
-                            endpoint=endpoint,
-                            credential=AzureKeyCredential(api_key)
-                        )
-                        logger.info("Using Azure AI Inference SDK (on-demand)")
-                    except Exception as e:
-                        logger.error(f"Failed to initialize Azure SDK: {e}")
-                
-                if client is None and OPENAI_SDK_AVAILABLE:
-                    try:
-                        client = OpenAI(
-                            base_url=endpoint,
-                            api_key=api_key
-                        )
-                        logger.info("Using OpenAI SDK (on-demand)")
-                    except Exception as e:
-                        logger.error(f"Failed to initialize OpenAI SDK: {e}")
-                
-                if client is None:
-                    logger.error("Cannot initialize API client for fallback - no compatible SDK available")
-                    # Continue with fallback segments for remaining items
-                    for i, segment in enumerate(batch_segments):
-                        idx = batch_start + i
-                        scored_segments.append(create_fallback_segment(segment))
-                    continue
-            
-            if len(batch_segments) == 1:
-                # Single segment API processing
-                segment = batch_segments[0]
-                idx = batch_start
-                
-                try:
-                    # Format prompt with segment data using token replacement
-                    prompt = (
-                        prompt_template
-                        .replace("{{SEGMENT_TEXT}}", segment["text"])
-                        .replace("{{DURATION}}", f"{segment['duration']:.1f}")
-                    )
-                    
-                    ai_response = None
-                    api_call_succeeded = False
-                    max_retries = 3
-                    
-                    for attempt in range(max_retries + 1):
-                        try:
-                            if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
-                                response = client.complete(
-                                    messages=[
-                                        {"role": "system", "content": system_message},
-                                        {"role": "user", "content": prompt}
-                                    ],
-                                    model=model_name,
-                                    temperature=temperature,
-                                    max_tokens=1024,
-                                    response_format={"type": "json_object"}
-                                )
-                                ai_response = response.choices[0].message.content
-                                
-                                # Track token usage
-                                if hasattr(response, 'usage'):
-                                    tokens_used += response.usage.total_tokens
-                                
-                            else:  # OpenAI SDK
-                                response = client.chat.completions.create(
-                                    model=model_name,
-                                    messages=[
-                                        {"role": "system", "content": system_message},
-                                        {"role": "user", "content": prompt}
-                                    ],
-                                    temperature=temperature,
-                                    max_tokens=1024,
-                                    response_format={"type": "json_object"}
-                                )
-                                ai_response = response.choices[0].message.content
-                                
-                                # Track token usage
-                                if hasattr(response, 'usage'):
-                                    tokens_used += response.usage.total_tokens
-                            
-                            api_call_succeeded = True
-                            break
-                            
-                        except Exception as api_error:
-                            # Check for rate limiting (429)
-                            is_rate_limit = False
-                            retry_after = None
-                            
-                            if hasattr(api_error, 'status_code') and api_error.status_code == 429:
-                                is_rate_limit = True
-                                # Try to extract retry-after
-                                if hasattr(api_error, 'response') and hasattr(api_error.response, 'headers'):
-                                    retry_after = api_error.response.headers.get('retry-after')
-                                    if retry_after:
-                                        retry_after = int(retry_after)
-                            
-                            if is_rate_limit and retry_after and retry_after > 60:
-                                logger.error(f"Rate limit with long cooldown ({retry_after}s). Stopping.")
-                                raise RuntimeError(f"Rate limit exceeded: retry after {retry_after}s")
-                            
-                            if attempt < max_retries:
-                                # Exponential backoff with jitter
-                                if is_rate_limit and retry_after:
-                                    backoff = retry_after + random.uniform(1, 5)
-                                else:
-                                    backoff = min(60, (2 ** attempt) + random.uniform(0, 1))
-                                
-                                logger.warning(f"API call failed for segment {idx + 1}, retrying in {backoff:.1f}s... ({api_error})")
-                                time.sleep(backoff)
-                            else:
-                                logger.error(f"API call failed for segment {idx + 1} after {max_retries + 1} attempts: {api_error}")
-                                raise
-                    
-                    if not api_call_succeeded or ai_response is None:
-                        raise RuntimeError("API call failed and no response received")
-                    
-                    # Parse API response
-                    try:
-                        ai_analysis = extract_json_safe(ai_response)
-                        logger.debug(f"Segment {idx + 1}/{len(segments_to_score)}: scored with API")
-                    except ValueError as e:
-                        logger.warning(f"Failed to parse API response for segment {idx + 1}: {e}")
-                        raise
-                    
-                    # Process single segment response
-                    scored_segment = process_single_segment_response(segment, ai_analysis, idx)
-                    scored_segments.append(scored_segment)
-                    
-                    # Add delay between requests
-                    if idx < len(segments_to_score) - 1:
-                        time.sleep(inter_request_delay)
-                    
-                except Exception as e:
-                    logger.error(f"Failed to score segment {idx + 1}: {str(e)}")
-                    scored_segments.append(create_fallback_segment(segment))
-            
-            else:
-                # Batch processing for multiple segments
-                try:
-                    # Create batch prompt
-                    batch_prompt = create_batch_prompt(batch_segments, prompt_template)
-                    
-                    # Call AI model with retry logic
-                    ai_response = None
-                    api_call_succeeded = False
-                    max_retries = 1
-                    
-                    for attempt in range(max_retries + 1):
-                        try:
-                            if AZURE_SDK_AVAILABLE and isinstance(client, ChatCompletionsClient):
-                                response = client.complete(
-                                    messages=[
-                                        {"role": "system", "content": system_message},
-                                        {"role": "user", "content": batch_prompt}
-                                    ],
-                                    model=model_name,
-                                    temperature=temperature,
-                                    max_tokens=4096,  # Larger for batch responses
-                                    response_format={"type": "json_object"}
-                                )
-                                
-                                ai_response = response.choices[0].message.content
-                                
-                                # Track token usage
-                                if hasattr(response, 'usage'):
-                                    tokens_used += response.usage.total_tokens
-                                
-                            else:  # OpenAI SDK
-                                response = client.chat.completions.create(
-                                    model=model_name,
-                                    messages=[
-                                        {"role": "system", "content": system_message},
-                                        {"role": "user", "content": batch_prompt}
-                                    ],
-                                    temperature=temperature,
-                                    max_tokens=4096,  # Larger for batch responses
-                                    response_format={"type": "json_object"}
-                                )
-                                
-                                ai_response = response.choices[0].message.content
-                                
-                                # Track token usage
-                                if hasattr(response, 'usage'):
-                                    tokens_used += response.usage.total_tokens
-                            
-                            # API call succeeded
-                            api_call_succeeded = True
-                            api_calls_made += 1
-                            logger.debug(f"Batch {(batch_start // effective_batch_size) + 1}: scored {len(batch_segments)} segments with API")
-                            logger.info(f"API call {api_calls_made}: {len(batch_segments)} segments, {tokens_used} tokens used so far")
-                            
-                            # Add inter-request delay
-                            if batch_start > 0:
-                                time.sleep(inter_request_delay)
-                            
-                            break
-                            
-                        except Exception as api_error:
-                            # Check if it's a 429 rate limit error
-                            if hasattr(api_error, 'status_code') and api_error.status_code == 429:
-                                retry_after = extract_retry_after(api_error)
-                                if retry_after and retry_after > max_cooldown_threshold:
-                                    logger.error(f"Rate limit exceeded with long cooldown ({retry_after}s). Stopping scoring.")
-                                    remaining = segments_to_score[batch_start:]
-                                    save_pipeline_state(scored_segments, remaining)
-                                    return scored_segments
-                                
-                                sleep_time = (retry_after or 10) + random.uniform(1, 5)
-                                logger.warning(f"Rate limited. Sleeping for {sleep_time:.1f}s")
-                                time.sleep(sleep_time)
-                                continue
-                            
-                            if attempt < max_retries:
-                                backoff = min(300, (2 ** attempt) + random.uniform(0, 1))
-                                logger.warning(f"API call failed for batch starting at {batch_start + 1}, retrying in {backoff:.1f}s... ({api_error})")
-                                time.sleep(backoff)
-                            else:
-                                logger.error(f"API call failed for batch after {max_retries + 1} attempts: {api_error}")
-                                raise
-                    
-                    if not api_call_succeeded or ai_response is None:
-                        raise RuntimeError("API call failed and no response received")
-                    
-                    # Parse batch response
-                    batch_analysis = extract_json_safe(ai_response)
-                    
-                    # Extract results array
-                    results = batch_analysis.get('results', [])
-                    
-                    if not results:
-                        logger.warning("Batch response missing 'results' array, falling back to individual parsing")
-                        # Fallback: try to treat as single response
-                        results = [batch_analysis]
-                    
-                    # Process each result and match to original segments
-                    for i, segment in enumerate(batch_segments):
-                        idx = batch_start + i
-                        
-                        # Find matching result by id
-                        result = None
-                        for r in results:
-                            if r.get('id') == i + 1:
-                                result = r
-                                break
-                        
-                        if result is None and i < len(results):
-                            # Fallback: use positional matching
-                            result = results[i]
-                        
-                        if result:
-                            scored_segment = process_single_segment_response(segment, result, idx)
-                            scored_segments.append(scored_segment)
-                        else:
-                            logger.warning(f"No result found for segment {idx + 1} in batch")
-                            scored_segments.append(create_fallback_segment(segment))
-                    
-                except Exception as e:
-                    logger.error(f"Failed to score batch starting at {batch_start + 1}: {str(e)}")
-                    # Add fallback for all segments in batch
-                    for i, segment in enumerate(batch_segments):
-                        scored_segments.append(create_fallback_segment(segment))
     
-    # Sort by overall score (highest first)
-    scored_segments.sort(key=lambda x: x.get("overall_score", 0), reverse=True)
+    logger.info(f"Scoring complete: {len(scored_segments)} segments scored")
+    logger.info(f"API calls made: {api_calls_made}")
+    logger.info(f"Total tokens used: {tokens_used}")
     
-    logger.info(f"Completed scoring {len(scored_segments)} segments")
-    
-    if scored_segments:
-        # Calculate statistics
-        scores = [s.get("overall_score", 0.0) for s in scored_segments]
-        final_scores = [s.get("final_score", 0.0) for s in scored_segments]
-        max_score = max(scores)
-        avg_score = sum(scores) / len(scores) if scores else 0
-        max_final = max(final_scores)
-        avg_final = sum(final_scores) / len(final_scores) if final_scores else 0
-        
-        # Get threshold from config
-        min_score_threshold = model_config.get('min_score_threshold', 6.0)
-        
-        # Count high-quality segments
-        high_quality = sum(1 for s in scores if s >= min_score_threshold)
-        
-        logger.info(f"Scoring complete: max={max_score:.1f}/10 (final={max_final:.1f}/100), avg={avg_score:.1f}/10 (final={avg_final:.1f}/100)")
-        logger.info(f"High-quality segments (score >= {min_score_threshold}): {high_quality}")
-        
-        # Sanity check: warn if ALL segments scored 0
-        if max_score == 0 and max_final == 0:
-            logger.warning("=" * 80)
-            logger.warning("WARNING: ALL SEGMENTS SCORED 0!")
-            logger.warning("This likely indicates an API or parsing issue:")
-            logger.warning("  1. Check if API key is valid and has correct permissions")
-            logger.warning("  2. Check if model endpoint is accessible")
-            logger.warning("  3. Review raw model output logs above for errors")
-            logger.warning("  4. Verify response_format is supported by the model")
-            logger.warning("=" * 80)
-    else:
-        logger.warning("No segments scored successfully")
+    # Sort by final score
+    scored_segments.sort(key=lambda x: x.get('final_score', 0), reverse=True)
     
     return scored_segments

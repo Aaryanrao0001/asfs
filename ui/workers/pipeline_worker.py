@@ -24,9 +24,10 @@ class PipelineWorker(QThread):
         self.video_path = None
         self.output_dir = None
         self.config = {}
+        self.use_cache = True  # Default to using cache
         self.should_stop = False
     
-    def configure(self, video_path: str, output_dir: str, config: dict):
+    def configure(self, video_path: str, output_dir: str, config: dict, use_cache: bool = True):
         """
         Configure the pipeline parameters.
         
@@ -34,10 +35,12 @@ class PipelineWorker(QThread):
             video_path: Path to input video
             output_dir: Output directory
             config: Configuration dictionary with all settings
+            use_cache: Whether to use cached results (default: True)
         """
         self.video_path = video_path
         self.output_dir = output_dir
         self.config = config
+        self.use_cache = use_cache
     
     def stop(self):
         """Signal the worker to stop."""
@@ -73,7 +76,7 @@ class PipelineWorker(QThread):
                 run_pipeline(
                     video_path=self.video_path,
                     output_dir=self.output_dir,
-                    use_cache=True
+                    use_cache=self.use_cache
                 )
                 
                 if not self.should_stop:

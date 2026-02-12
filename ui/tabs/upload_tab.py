@@ -164,6 +164,44 @@ class UploadTab(QWidget):
         
         layout.addWidget(delay_group)
         
+        # Auto-Schedule & Background Upload Settings (NEW)
+        schedule_group = QGroupBox("Auto-Schedule & Background Upload")
+        schedule_layout = QVBoxLayout(schedule_group)
+        
+        self.enable_scheduling = QCheckBox("Enable Auto-Scheduling")
+        self.enable_scheduling.setChecked(False)
+        self.enable_scheduling.stateChanged.connect(self.on_settings_changed)
+        schedule_layout.addWidget(self.enable_scheduling)
+        
+        # Time gap between uploads
+        gap_h_layout = QHBoxLayout()
+        gap_h_layout.addWidget(QLabel("Time Gap Between Uploads:"))
+        self.upload_gap_hours = QSpinBox()
+        self.upload_gap_hours.setMinimum(0)
+        self.upload_gap_hours.setMaximum(24)
+        self.upload_gap_hours.setValue(1)
+        self.upload_gap_hours.setSuffix(" hours")
+        self.upload_gap_hours.valueChanged.connect(self.on_settings_changed)
+        gap_h_layout.addWidget(self.upload_gap_hours)
+        
+        self.upload_gap_minutes = QSpinBox()
+        self.upload_gap_minutes.setMinimum(0)
+        self.upload_gap_minutes.setMaximum(59)
+        self.upload_gap_minutes.setValue(0)
+        self.upload_gap_minutes.setSuffix(" minutes")
+        self.upload_gap_minutes.valueChanged.connect(self.on_settings_changed)
+        gap_h_layout.addWidget(self.upload_gap_minutes)
+        gap_h_layout.addStretch()
+        
+        schedule_layout.addLayout(gap_h_layout)
+        
+        schedule_hint = QLabel("App will automatically upload videos at set intervals in the background")
+        schedule_hint.setProperty("subheading", True)
+        schedule_hint.setWordWrap(True)
+        schedule_layout.addWidget(schedule_hint)
+        
+        layout.addWidget(schedule_group)
+        
         # Spacer
         layout.addStretch()
     
@@ -342,7 +380,10 @@ class UploadTab(QWidget):
             "user_data_dir": self.user_data_dir.text(),
             "profile_directory": self.profile_directory.currentText(),
             "min_delay": self.min_delay.value(),
-            "max_delay": self.max_delay.value()
+            "max_delay": self.max_delay.value(),
+            "enable_scheduling": self.enable_scheduling.isChecked(),
+            "upload_gap_hours": self.upload_gap_hours.value(),
+            "upload_gap_minutes": self.upload_gap_minutes.value()
         }
     
     def set_settings(self, settings: dict):
@@ -368,3 +409,12 @@ class UploadTab(QWidget):
         
         if "max_delay" in settings:
             self.max_delay.setValue(settings["max_delay"])
+        
+        if "enable_scheduling" in settings:
+            self.enable_scheduling.setChecked(settings["enable_scheduling"])
+        
+        if "upload_gap_hours" in settings:
+            self.upload_gap_hours.setValue(settings["upload_gap_hours"])
+        
+        if "upload_gap_minutes" in settings:
+            self.upload_gap_minutes.setValue(settings["upload_gap_minutes"])

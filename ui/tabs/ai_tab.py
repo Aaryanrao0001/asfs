@@ -1,31 +1,50 @@
 """
-AI/Model Settings Tab - Ollama controls and AI configuration.
+AI/Model Settings Tab - GitHub Models API configuration.
 """
 
+import os
+import yaml
+from pathlib import Path
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QComboBox, QSlider, QGroupBox
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QLineEdit, QSlider, QGroupBox
 )
-from PySide6.QtCore import Signal, Qt, QTimer
+from PySide6.QtCore import Signal, Qt
+
+
+# Default values (loaded from config if available)
+DEFAULT_MODEL_NAME = "gpt-4o"
+DEFAULT_ENDPOINT = "https://models.inference.ai.azure.com"
+
+def load_model_defaults():
+    """Load default values from config/model.yaml if available."""
+    global DEFAULT_MODEL_NAME, DEFAULT_ENDPOINT
+    
+    try:
+        config_path = Path(__file__).parent.parent.parent / "config" / "model.yaml"
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+                model_config = config.get('model', {})
+                DEFAULT_MODEL_NAME = model_config.get('model_name', DEFAULT_MODEL_NAME)
+                DEFAULT_ENDPOINT = model_config.get('endpoint', DEFAULT_ENDPOINT)
+    except Exception:
+        pass  # Use hardcoded defaults if config loading fails
+
+
+# Load defaults on module import
+load_model_defaults()
 
 
 class AITab(QWidget):
-    """Tab for AI model and Ollama management."""
+    """Tab for AI model configuration."""
     
     # Signals
-    start_ollama_clicked = Signal()
-    stop_ollama_clicked = Signal()
-    load_model_clicked = Signal(str)  # Model name
     settings_changed = Signal(dict)  # All AI settings
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.init_ui()
-        
-        # Timer for status updates
-        self.status_timer = QTimer(self)
-        self.status_timer.timeout.connect(self.request_status_update)
-        self.status_timer.start(3000)  # Update every 3 seconds
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -37,75 +56,38 @@ class AITab(QWidget):
         title.setProperty("heading", True)
         layout.addWidget(title)
         
-        # Ollama controls group
-        ollama_group = QGroupBox("Ollama Local LLM")
-        ollama_layout = QVBoxLayout(ollama_group)
+        # GitHub Models API group
+        api_group = QGroupBox("GitHub Models API")
+        api_layout = QVBoxLayout(api_group)
         
-        # Status display
-        status_h_layout = QHBoxLayout()
-        status_h_layout.addWidget(QLabel("Server Status:"))
-        self.ollama_status = QLabel("Unknown")
-        self.ollama_status.setProperty("status", "stopped")
-        status_h_layout.addWidget(self.ollama_status)
-        status_h_layout.addStretch()
-        ollama_layout.addLayout(status_h_layout)
-        
-        # Model status
-        model_status_h_layout = QHBoxLayout()
-        model_status_h_layout.addWidget(QLabel("Model Status:"))
-        self.model_status = QLabel("Unknown")
-        self.model_status.setProperty("status", "stopped")
-        model_status_h_layout.addWidget(self.model_status)
-        model_status_h_layout.addStretch()
-        ollama_layout.addLayout(model_status_h_layout)
-        
-        # Control buttons
-        buttons_layout = QHBoxLayout()
-        
-        self.start_btn = QPushButton("Start Ollama")
-        self.start_btn.clicked.connect(self.on_start_clicked)
-        buttons_layout.addWidget(self.start_btn)
-        
-        self.stop_btn = QPushButton("Stop Ollama")
-        self.stop_btn.setProperty("secondary", True)
-        self.stop_btn.clicked.connect(self.on_stop_clicked)
-        self.stop_btn.setEnabled(False)
-        buttons_layout.addWidget(self.stop_btn)
-        
-        self.load_model_btn = QPushButton("Load Model")
-        self.load_model_btn.clicked.connect(self.on_load_model_clicked)
-        self.load_model_btn.setEnabled(False)
-        buttons_layout.addWidget(self.load_model_btn)
-        
-        buttons_layout.addStretch()
-        ollama_layout.addLayout(buttons_layout)
-        
-        layout.addWidget(ollama_group)
-        
-        # Model configuration group
-        model_group = QGroupBox("Model Configuration")
-        model_layout = QVBoxLayout(model_group)
+        # Info label
+        info_label = QLabel(
+            "Using GitHub Models API for AI scoring.\n"
+            "Set GITHUB_TOKEN environment variable with your GitHub token."
+        )
+        info_label.setWordWrap(True)
+        info_label.setProperty("subheading", True)
+        api_layout.addWidget(info_label)
         
         # Model name
         model_name_layout = QHBoxLayout()
         model_name_layout.addWidget(QLabel("Model Name:"))
-        self.model_name = QLineEdit("qwen2.5:3b-instruct")
+        self.model_name = QLineEdit(DEFAULT_MODEL_NAME)
+        self.model_name.setPlaceholderText("e.g., gpt-4o, gpt-4o-mini")
         self.model_name.textChanged.connect(self.on_settings_changed)
         model_name_layout.addWidget(self.model_name)
-        model_layout.addLayout(model_name_layout)
+        api_layout.addLayout(model_name_layout)
         
-        # LLM backend selector
-        backend_layout = QHBoxLayout()
-        backend_layout.addWidget(QLabel("LLM Backend:"))
-        self.backend_selector = QComboBox()
-        self.backend_selector.addItems(["auto", "local", "api"])
-        self.backend_selector.setCurrentText("auto")
-        self.backend_selector.currentTextChanged.connect(self.on_settings_changed)
-        backend_layout.addWidget(self.backend_selector)
-        backend_layout.addStretch()
-        model_layout.addLayout(backend_layout)
+        # Endpoint (optional)
+        endpoint_layout = QHBoxLayout()
+        endpoint_layout.addWidget(QLabel("API Endpoint:"))
+        self.endpoint = QLineEdit(DEFAULT_ENDPOINT)
+        self.endpoint.setPlaceholderText("Default GitHub Models endpoint")
+        self.endpoint.textChanged.connect(self.on_settings_changed)
+        endpoint_layout.addWidget(self.endpoint)
+        api_layout.addLayout(endpoint_layout)
         
-        layout.addWidget(model_group)
+        layout.addWidget(api_group)
         
         # Scoring configuration group
         scoring_group = QGroupBox("Scoring Configuration")
@@ -147,23 +129,30 @@ class AITab(QWidget):
         
         scoring_layout.addLayout(temp_layout)
         
+        # Max segments
+        max_segments_layout = QHBoxLayout()
+        max_segments_layout.addWidget(QLabel("Max Segments to Score:"))
+        self.max_segments = QLineEdit("50")
+        self.max_segments.setMaximumWidth(100)
+        self.max_segments.textChanged.connect(self.on_settings_changed)
+        max_segments_layout.addWidget(self.max_segments)
+        max_segments_layout.addStretch()
+        scoring_layout.addLayout(max_segments_layout)
+        
+        # Batch size
+        batch_size_layout = QHBoxLayout()
+        batch_size_layout.addWidget(QLabel("Batch Size:"))
+        self.batch_size = QLineEdit("6")
+        self.batch_size.setMaximumWidth(100)
+        self.batch_size.textChanged.connect(self.on_settings_changed)
+        batch_size_layout.addWidget(self.batch_size)
+        batch_size_layout.addStretch()
+        scoring_layout.addLayout(batch_size_layout)
+        
         layout.addWidget(scoring_group)
         
         # Spacer
         layout.addStretch()
-    
-    def on_start_clicked(self):
-        """Handle start Ollama button click."""
-        self.start_ollama_clicked.emit()
-    
-    def on_stop_clicked(self):
-        """Handle stop Ollama button click."""
-        self.stop_ollama_clicked.emit()
-    
-    def on_load_model_clicked(self):
-        """Handle load model button click."""
-        model = self.model_name.text()
-        self.load_model_clicked.emit(model)
     
     def on_threshold_changed(self, value):
         """Handle threshold slider change."""
@@ -182,57 +171,47 @@ class AITab(QWidget):
         settings = self.get_settings()
         self.settings_changed.emit(settings)
     
-    def request_status_update(self):
-        """Request parent to update status (called by timer)."""
-        # This will be connected to a slot in the main window
-        pass
-    
-    def update_ollama_status(self, running: bool, model_loaded: bool):
-        """Update Ollama and model status display."""
-        if running:
-            self.ollama_status.setText("Running")
-            self.ollama_status.setProperty("status", "running")
-            self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
-            self.load_model_btn.setEnabled(True)
-        else:
-            self.ollama_status.setText("Not Running")
-            self.ollama_status.setProperty("status", "stopped")
-            self.start_btn.setEnabled(True)
-            self.stop_btn.setEnabled(False)
-            self.load_model_btn.setEnabled(False)
-        
-        if model_loaded:
-            self.model_status.setText("Loaded")
-            self.model_status.setProperty("status", "success")
-        else:
-            self.model_status.setText("Not Loaded")
-            self.model_status.setProperty("status", "stopped")
-        
-        # Refresh style
-        self.ollama_status.style().unpolish(self.ollama_status)
-        self.ollama_status.style().polish(self.ollama_status)
-        self.model_status.style().unpolish(self.model_status)
-        self.model_status.style().polish(self.model_status)
-    
     def get_settings(self) -> dict:
-        """Get all AI settings."""
+        """Get current AI settings."""
+        try:
+            max_segments = int(self.max_segments.text())
+        except ValueError:
+            max_segments = 50
+        
+        try:
+            batch_size = int(self.batch_size.text())
+        except ValueError:
+            batch_size = 6
+        
         return {
-            "model_name": self.model_name.text(),
-            "backend": self.backend_selector.currentText(),
-            "threshold": float(self.threshold_value.text()),
-            "temperature": float(self.temp_value.text())
+            'model_name': self.model_name.text(),
+            'endpoint': self.endpoint.text(),
+            'temperature': self.temp_slider.value() / 10.0,
+            'min_score_threshold': self.threshold_slider.value() / 10.0,
+            'max_segments_to_score': max_segments,
+            'batch_size': batch_size
         }
     
     def set_settings(self, settings: dict):
-        """Set AI settings from dictionary."""
-        if "model_name" in settings:
-            self.model_name.setText(settings["model_name"])
-        if "backend" in settings:
-            self.backend_selector.setCurrentText(settings["backend"])
-        if "threshold" in settings:
-            value = int(settings["threshold"] * 10)
-            self.threshold_slider.setValue(value)
-        if "temperature" in settings:
-            value = int(settings["temperature"] * 10)
-            self.temp_slider.setValue(value)
+        """Set AI settings from config."""
+        if 'model_name' in settings:
+            self.model_name.setText(settings['model_name'])
+        
+        if 'endpoint' in settings:
+            self.endpoint.setText(settings['endpoint'])
+        
+        if 'temperature' in settings:
+            temp = int(settings['temperature'] * 10)
+            self.temp_slider.setValue(temp)
+            self.temp_value.setText(f"{settings['temperature']:.1f}")
+        
+        if 'min_score_threshold' in settings:
+            threshold = int(settings['min_score_threshold'] * 10)
+            self.threshold_slider.setValue(threshold)
+            self.threshold_value.setText(f"{settings['min_score_threshold']:.1f}")
+        
+        if 'max_segments_to_score' in settings:
+            self.max_segments.setText(str(settings['max_segments_to_score']))
+        
+        if 'batch_size' in settings:
+            self.batch_size.setText(str(settings['batch_size']))

@@ -14,7 +14,7 @@ from .tabs.ai_tab import AITab
 from .tabs.metadata_tab import MetadataTab
 from .tabs.upload_tab import UploadTab
 from .tabs.run_tab import RunTab
-from .workers.ollama_worker import OllamaWorker
+from .tabs.videos_tab import VideosTab
 from .workers.pipeline_worker import PipelineWorker
 
 logger = logging.getLogger(__name__)
@@ -25,14 +25,10 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
+        self.batch_message_shown = False  # Track if batch message was shown
         self.init_ui()
         self.init_workers()
         self.load_settings()
-        
-        # Start status updates
-        self.status_timer = QTimer(self)
-        self.status_timer.timeout.connect(self.update_ollama_status)
-        self.status_timer.start(3000)  # Update every 3 seconds
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -48,6 +44,7 @@ class MainWindow(QMainWindow):
         self.ai_tab = AITab()
         self.metadata_tab = MetadataTab()
         self.upload_tab = UploadTab()
+        self.videos_tab = VideosTab()
         self.run_tab = RunTab()
         
         # Add tabs
@@ -55,35 +52,50 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.ai_tab, "🤖 AI / Model")
         self.tabs.addTab(self.metadata_tab, "📝 Metadata")
         self.tabs.addTab(self.upload_tab, "🚀 Upload")
+        self.tabs.addTab(self.videos_tab, "🎬 Videos")
         self.tabs.addTab(self.run_tab, "▶️ Run & Monitor")
         
         self.setCentralWidget(self.tabs)
         
         # Connect signals
         self.connect_signals()
+        
+        # Set metadata callback for videos tab
+        self.videos_tab.set_metadata_callback(lambda: self.metadata_tab.get_settings())
     
     def init_workers(self):
         """Initialize background workers."""
-        self.ollama_worker = OllamaWorker()
-        self.ollama_worker.operation_complete.connect(self.on_ollama_operation_complete)
-        self.ollama_worker.status_update.connect(self.on_ollama_status_update)
-        
         self.pipeline_worker = PipelineWorker()
         self.pipeline_worker.log_message.connect(self.on_pipeline_log)
         self.pipeline_worker.progress_update.connect(self.on_pipeline_progress)
         self.pipeline_worker.finished.connect(self.on_pipeline_finished)
         self.pipeline_worker.error_occurred.connect(self.on_pipeline_error)
+        
+        # Initialize scheduler
+        try:
+            from scheduler.auto_scheduler import get_scheduler
+            self.scheduler = get_scheduler()
+            self.scheduler.set_upload_callback(self.execute_scheduled_upload)
+            logger.info("Scheduler initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize scheduler: {e}")
+            # Create a dummy scheduler that does nothing
+            class DummyScheduler:
+                def configure(self, **kwargs): pass
+                def is_running(self): return False
+                def start(self): logger.warning("Scheduler not available")
+                def stop(self): pass
+            self.scheduler = DummyScheduler()
     
     def connect_signals(self):
         """Connect all UI signals to handlers."""
         # Input tab
         self.input_tab.video_selected.connect(self.on_video_selected)
+        self.input_tab.videos_selected.connect(self.on_videos_selected)
         self.input_tab.output_changed.connect(self.on_output_changed)
+        self.input_tab.cache_changed.connect(self.on_cache_changed)
         
         # AI tab
-        self.ai_tab.start_ollama_clicked.connect(self.on_start_ollama)
-        self.ai_tab.stop_ollama_clicked.connect(self.on_stop_ollama)
-        self.ai_tab.load_model_clicked.connect(self.on_load_model)
         self.ai_tab.settings_changed.connect(self.on_ai_settings_changed)
         
         # Metadata tab
@@ -102,53 +114,20 @@ class MainWindow(QMainWindow):
         logger.info(f"Video selected: {path}")
         self.save_settings()
     
+    def on_videos_selected(self, paths: list):
+        """Handle multiple videos selection."""
+        logger.info(f"{len(paths)} videos selected")
+        self.save_settings()
+    
     def on_output_changed(self, path: str):
         """Handle output directory change."""
         logger.info(f"Output directory changed: {path}")
         self.save_settings()
     
-    def on_start_ollama(self):
-        """Handle start Ollama request."""
-        self.run_tab.append_log("Starting Ollama server...")
-        self.ollama_worker.start_server()
-    
-    def on_stop_ollama(self):
-        """Handle stop Ollama request."""
-        self.run_tab.append_log("Stopping Ollama server...")
-        self.ollama_worker.stop_server()
-    
-    def on_load_model(self, model_name: str):
-        """Handle load model request."""
-        self.run_tab.append_log(f"Loading model: {model_name}")
-        QMessageBox.information(
-            self,
-            "Loading Model",
-            f"Downloading {model_name}...\n\nThis may take several minutes depending on model size and network speed.\n\nThe UI will remain responsive. Check the logs for progress."
-        )
-        self.ollama_worker.load_model(model_name)
-    
-    def on_ollama_operation_complete(self, success: bool, message: str):
-        """Handle Ollama operation completion."""
-        self.run_tab.append_log(f"Ollama: {message}")
-        
-        if success:
-            QMessageBox.information(self, "Success", message)
-        else:
-            QMessageBox.warning(self, "Operation Failed", message)
-        
-        # Update status
-        self.update_ollama_status()
-    
-    def on_ollama_status_update(self, status: dict):
-        """Handle Ollama status update."""
-        running = status.get("running", False)
-        model_loaded = status.get("model_loaded", False)
-        self.ai_tab.update_ollama_status(running, model_loaded)
-    
-    def update_ollama_status(self):
-        """Request Ollama status update."""
-        if not self.ollama_worker.isRunning():
-            self.ollama_worker.check_status()
+    def on_cache_changed(self, use_cache: bool):
+        """Handle cache setting change."""
+        logger.info(f"Cache setting changed: {use_cache}")
+        self.save_settings()
     
     def on_ai_settings_changed(self, settings: dict):
         """Handle AI settings change."""
@@ -164,22 +143,123 @@ class MainWindow(QMainWindow):
         """Handle upload settings change."""
         logger.debug(f"Upload settings changed: {settings}")
         self.save_settings()
+        
+        # Update scheduler configuration
+        enable_scheduling = settings.get("enable_scheduling", False)
+        upload_gap_hours = settings.get("upload_gap_hours", 1)
+        upload_gap_minutes = settings.get("upload_gap_minutes", 0)
+        
+        # Get selected platforms
+        platforms_config = settings.get("platforms", {})
+        enabled_platforms = []
+        if platforms_config.get("instagram"):
+            enabled_platforms.append("Instagram")
+        if platforms_config.get("tiktok"):
+            enabled_platforms.append("TikTok")
+        if platforms_config.get("youtube"):
+            enabled_platforms.append("YouTube")
+        
+        # Configure scheduler
+        self.scheduler.configure(
+            upload_gap_hours=upload_gap_hours,
+            upload_gap_minutes=upload_gap_minutes,
+            platforms=enabled_platforms
+        )
+        
+        # Start or stop scheduler based on setting
+        if enable_scheduling and not self.scheduler.is_running():
+            self.scheduler.start()
+            logger.info("Auto-scheduler started")
+        elif not enable_scheduling and self.scheduler.is_running():
+            self.scheduler.stop()
+            logger.info("Auto-scheduler stopped")
+    
+    def execute_scheduled_upload(self, video_id: str, platform: str, metadata: dict) -> bool:
+        """
+        Execute a scheduled upload (called by scheduler).
+        
+        Args:
+            video_id: Video ID to upload
+            platform: Platform name
+            metadata: Video metadata
+            
+        Returns:
+            True if upload succeeded, False otherwise
+        """
+        try:
+            # Get current metadata settings from UI
+            metadata_settings = self.metadata_tab.get_settings()
+            
+            # Merge with video metadata
+            from metadata import MetadataConfig
+            from metadata.resolver import resolve_metadata
+            
+            # Create metadata config from UI settings
+            config = MetadataConfig.from_ui_values(
+                mode=metadata_settings.get("mode", "uniform"),
+                title_input=metadata_settings.get("title", ""),
+                description_input=metadata_settings.get("description", ""),
+                caption_input=metadata_settings.get("caption", ""),
+                tags_input=metadata_settings.get("tags", ""),
+                hashtag_prefix=metadata_settings.get("hashtag_prefix", True),
+                hook_phrase=metadata_settings.get("hook_phrase", ""),
+                hook_position=metadata_settings.get("hook_position", "Top Left"),
+                logo_path=metadata_settings.get("logo_path", "")
+            )
+            
+            # Resolve metadata for this upload
+            resolved = resolve_metadata(config)
+            
+            # Execute upload
+            from pipeline import run_upload_stage
+            success = run_upload_stage(video_id, platform, resolved)
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error in scheduled upload: {e}")
+            return False
     
     def on_run_pipeline(self):
         """Handle run pipeline request."""
         # Validate inputs
         video_path = self.input_tab.get_video_path()
+        selected_videos = self.input_tab.get_selected_videos()
         
-        if not video_path or not os.path.exists(video_path):
+        # Check if we have any videos selected
+        if not selected_videos:
             QMessageBox.warning(
                 self,
                 "Invalid Input",
-                "Please select a valid video file before running the pipeline."
+                "Please select a video file or folder before running the pipeline."
+            )
+            self.run_tab.pipeline_finished(False)
+            return
+        
+        # For now, only process first video (TODO: add batch processing)
+        if len(selected_videos) > 1 and not self.batch_message_shown:
+            QMessageBox.information(
+                self,
+                "Batch Processing",
+                f"Selected {len(selected_videos)} videos.\n\n"
+                "Currently processing first video only.\n"
+                "Full batch processing will be added in a future update."
+            )
+            self.batch_message_shown = True  # Don't show again this session
+        
+        video_path = selected_videos[0]
+        
+        if not os.path.exists(video_path):
+            QMessageBox.warning(
+                self,
+                "Invalid Input",
+                "Selected video file does not exist."
             )
             self.run_tab.pipeline_finished(False)
             return
         
         output_dir = self.input_tab.get_output_path()
+        use_cache = self.input_tab.get_use_cache()
         
         # Gather all configuration
         config = {
@@ -188,8 +268,12 @@ class MainWindow(QMainWindow):
             "upload": self.upload_tab.get_settings()
         }
         
+        # Log cache status
+        cache_status = "enabled" if use_cache else "disabled (forcing fresh processing)"
+        self.run_tab.append_log(f"Cache: {cache_status}\n")
+        
         # Configure and start worker
-        self.pipeline_worker.configure(video_path, output_dir, config)
+        self.pipeline_worker.configure(video_path, output_dir, config, use_cache)
         self.run_tab.pipeline_started()
         self.pipeline_worker.start()
         

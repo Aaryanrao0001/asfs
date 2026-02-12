@@ -23,6 +23,17 @@ A **fully automated desktop application** that transforms long-form videos into 
 - One-click model downloads
 - Offline-capable AI scoring
 
+**🧠 Enhanced Viral Detection (NEW)**
+- Multi-layer viral clip detection with psychological scoring
+- Emotion analysis using VADER + NRC emotion lexicons
+- Hook quality enforcement (first 7 seconds analysis)
+- Narrative arc detection (hook → tension → payoff)
+- Semantic deduplication (removes similar clips)
+- Auto-generates titles, captions, hashtags, and overlays
+- Two-stage pipeline: fast filtering → deep LLM analysis
+- 6-factor virality model (Curiosity 25%, Emotion 20%, Contrarian 20%, etc.)
+- See [VIRAL_DETECTION_GUIDE.md](VIRAL_DETECTION_GUIDE.md) for details
+
 ## 🎯 Overview
 
 This system intelligently:
@@ -144,16 +155,44 @@ The desktop application will open with 5 tabs:
 - **Fields**:
   - Title(s)
   - Description(s)
+  - Caption(s) - **NEW**: Comma-separated captions with random selection
   - Tags (comma-separated)
   - Hashtag prefix toggle
+- **Hook Phrase (Video Overlay)** - **NEW**:
+  - Add engaging text overlay to videos (e.g., "Wait for it...", "This is insane!")
+  - Position selector: Top Left, Top Right, Bottom Left, Bottom Right, Top Center
+  - Text appears at engaging spots (not center) with bold font and shadow for readability
+- **Logo Overlay** - **NEW**:
+  - Upload logo image (PNG with transparency recommended)
+  - Automatically placed at bottom center of videos
+  - Applied during preprocessing before upload
 
 ### Tab 4: Upload Platforms
 - **Platform Selection**: TikTok, Instagram, YouTube Shorts
 - **Brave Browser**: Auto-detect or custom path
 - **Profile Reuse**: Use existing login sessions
 - **Anti-Ban Settings**: Configurable upload delays
+- **Auto-Schedule & Background Upload** - **NEW**:
+  - Enable automatic scheduled uploads
+  - Configure time gaps between uploads (hours and minutes)
+  - App runs in background and uploads at set intervals
+  - Works across all three platforms
 
-### Tab 5: Run & Monitor
+### Tab 5: Videos - **NEW**
+- **Video Registry & Management**:
+  - Add multiple videos from any folder (not just pipeline output)
+  - Import ready-to-share videos with multi-select
+  - View upload status for all platforms (Instagram, TikTok, YouTube)
+  - Control duplicate upload permissions per video
+  - One-click upload to any platform
+  - Bulk upload all pending videos
+  - Auto-refresh every 5 seconds
+- **Preprocessing Applied**:
+  - Hook phrases and logos automatically applied before upload
+  - Captions and metadata from Tab 3 used for uploads
+  - Random selection for varied content
+
+### Tab 6: Run & Monitor
 - **Live Logs**: Real-time pipeline output
 - **Progress Bar**: Visual stage indicators
 - **Controls**: Run, Stop, Clear Logs

@@ -137,7 +137,7 @@ class AuditLogger:
         Log an upload event.
         
         Args:
-            clip_id: Clip identifier
+            clip_id: Clip identifier (video_id)
             platform: Platform name
             status: Upload status (pending, uploading, success, failed)
             upload_id: Platform-specific upload ID
@@ -167,6 +167,53 @@ class AuditLogger:
         conn.close()
         
         logger.debug(f"Upload event logged: {clip_id} to {platform} - {status}")
+        
+        # Also log to structured JSON file
+        self._log_upload_to_json(clip_id, platform, status, upload_id, 
+                                 retry_count, error_message, metadata)
+    
+    def _log_upload_to_json(
+        self,
+        video_id: str,
+        platform: str,
+        status: str,
+        upload_id: Optional[str] = None,
+        retry_count: int = 0,
+        error_message: Optional[str] = None,
+        metadata: Optional[Dict] = None
+    ):
+        """
+        Log upload event to structured JSON file.
+        
+        Args:
+            video_id: Video identifier
+            platform: Platform name
+            status: Upload status
+            upload_id: Platform post ID
+            retry_count: Retry count
+            error_message: Error message
+            metadata: Additional metadata
+        """
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "video_id": video_id,
+            "platform": platform,
+            "status": status,
+            "upload_id": upload_id,
+            "retry_count": retry_count,
+            "error_message": error_message,
+            "metadata": metadata
+        }
+        
+        # Ensure logs directory exists
+        Path("logs").mkdir(exist_ok=True)
+        
+        # Append to uploads.log
+        try:
+            with open("logs/uploads.log", "a") as f:
+                f.write(json.dumps(log_entry) + "\n")
+        except Exception as e:
+            logger.error(f"Failed to write to uploads.log: {e}")
     
     def log_clip(self, clip: Dict):
         """
