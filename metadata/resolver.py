@@ -17,14 +17,15 @@ def resolve_metadata(config: MetadataConfig) -> Dict[str, str]:
         config: MetadataConfig instance with mode and values
         
     Returns:
-        Dictionary with resolved title, description, and tags string
+        Dictionary with resolved title, description, caption, tags string, and overlays
     """
     result = {}
     
     if config.mode == "randomized":
-        # Randomized mode - select one title, one description, shuffle tags
+        # Randomized mode - select one title, one description, one caption, shuffle tags
         result["title"] = random.choice(config.titles) if config.titles else ""
         result["description"] = random.choice(config.descriptions) if config.descriptions else ""
+        result["caption"] = random.choice(config.captions) if config.captions else ""
         
         # Shuffle tags and format
         tags = config.tags.copy()
@@ -34,6 +35,7 @@ def resolve_metadata(config: MetadataConfig) -> Dict[str, str]:
         # Uniform mode - use first (only) values
         result["title"] = config.titles[0] if config.titles else ""
         result["description"] = config.descriptions[0] if config.descriptions else ""
+        result["caption"] = config.captions[0] if config.captions else ""
         tags = config.tags.copy()
     
     # Format tags with optional hashtag prefix
@@ -43,6 +45,11 @@ def resolve_metadata(config: MetadataConfig) -> Dict[str, str]:
         formatted_tags = [tag.lstrip('#') for tag in tags]
     
     result["tags"] = " ".join(formatted_tags)
+    
+    # Add overlay settings
+    result["hook_phrase"] = config.hook_phrase
+    result["hook_position"] = config.hook_position
+    result["logo_path"] = config.logo_path
     
     return result
 

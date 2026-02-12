@@ -8,10 +8,11 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
-    QGroupBox, QMessageBox, QAbstractItemView
+    QGroupBox, QMessageBox, QAbstractItemView, QFileDialog
 )
 from PySide6.QtCore import Signal, Qt, QTimer
 from PySide6.QtGui import QPixmap, QIcon
+import subprocess
 
 from database import VideoRegistry
 from ..workers.upload_worker import UploadWorker, BulkUploadWorker
@@ -49,6 +50,10 @@ class VideosTab(QWidget):
         
         # Control buttons
         controls_h_layout = QHBoxLayout()
+        
+        self.add_videos_btn = QPushButton("➕ Add Videos")
+        self.add_videos_btn.clicked.connect(self.add_videos_from_folder)
+        controls_h_layout.addWidget(self.add_videos_btn)
         
         self.refresh_btn = QPushButton("🔄 Refresh")
         self.refresh_btn.setProperty("secondary", True)
@@ -97,6 +102,98 @@ class VideosTab(QWidget):
         
         # Initial load
         self.refresh_videos()
+    
+    def add_videos_from_folder(self):
+        """Add multiple videos from any folder to the registry."""
+        file_dialog = QFileDialog(self)
+        file_dialog.setFileMode(QFileDialog.ExistingFiles)
+        file_dialog.setNameFilter("Video Files (*.mp4 *.mov *.avi *.mkv *.webm)")
+        file_dialog.setWindowTitle("Select Videos to Add")
+        
+        if file_dialog.exec():
+            selected_files = file_dialog.selectedFiles()
+            
+            if not selected_files:
+                return
+            
+            # Add each video to registry
+            added_count = 0
+            skipped_count = 0
+            
+            for video_path in selected_files:
+                try:
+                    # Get video duration using ffprobe
+                    duration = self._get_video_duration(video_path)
+                    
+                    # Generate video ID from filename
+                    video_id = Path(video_path).stem
+                    
+                    # Register video
+                    success = self.video_registry.register_video(
+                        video_id=video_id,
+                        file_path=video_path,
+                        title=video_id,
+                        duration=duration,
+                        duplicate_allowed=False,
+                        calculate_checksum=False  # Skip checksum for speed
+                    )
+                    
+                    if success:
+                        added_count += 1
+                        logger.info(f"Added video to registry: {video_id}")
+                    else:
+                        skipped_count += 1
+                        logger.warning(f"Video already exists: {video_id}")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to add video {video_path}: {e}")
+                    skipped_count += 1
+            
+            # Show summary
+            message = f"Added {added_count} video(s)"
+            if skipped_count > 0:
+                message += f"\nSkipped {skipped_count} (already exist or error)"
+            
+            QMessageBox.information(self, "Videos Added", message)
+            
+            # Refresh table
+            self.refresh_videos()
+    
+    def _get_video_duration(self, video_path: str) -> float:
+        """
+        Get video duration using ffprobe.
+        
+        Args:
+            video_path: Path to video file
+            
+        Returns:
+            Duration in seconds
+        """
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip())
+            else:
+                logger.warning(f"Could not get duration for {video_path}")
+                return 0.0
+                
+        except Exception as e:
+            logger.error(f"Error getting video duration: {e}")
+            return 0.0
     
     def get_status_icon(self, status: str) -> str:
         """
