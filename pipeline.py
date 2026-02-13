@@ -1003,6 +1003,162 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
             browser_manager.close()
 
 
+def run_campaign_upload(campaign_id: str, video_id: str, platform: str) -> bool:
+    """
+    Upload a video as part of a campaign with campaign-specific metadata.
+    
+    This is similar to run_upload_stage but:
+    1. Fetches campaign metadata instead of using provided metadata
+    2. Selects caption/title based on campaign mode (randomized or single)
+    3. Records result in campaign_uploads table
+    
+    Args:
+        campaign_id: Campaign identifier
+        video_id: Video identifier from registry
+        platform: Platform name (Instagram/TikTok/YouTube)
+        
+    Returns:
+        True if upload succeeded, False otherwise
+    """
+    logger.info(f"Campaign upload: {video_id} to {platform} (campaign: {campaign_id})")
+    
+    # Initialize managers
+    from database import CampaignManager
+    campaign_manager = CampaignManager()
+    video_registry = VideoRegistry()
+    audit = AuditLogger()
+    
+    # Get campaign metadata for this upload
+    metadata = campaign_manager.get_campaign_metadata_for_upload(campaign_id, video_id)
+    
+    if not metadata:
+        logger.error(f"Failed to get campaign metadata for {campaign_id}")
+        return False
+    
+    # Get video info from registry
+    video = video_registry.get_video(video_id)
+    
+    if not video:
+        logger.error(f"Video {video_id} not found in registry")
+        campaign_manager.record_campaign_upload(
+            campaign_id, video_id, platform, False, metadata,
+            error_message="Video not found in registry"
+        )
+        return False
+    
+    video_file = video['file_path']
+    
+    # Validate file exists
+    if not os.path.exists(video_file):
+        logger.error(f"Video file not found: {video_file}")
+        campaign_manager.record_campaign_upload(
+            campaign_id, video_id, platform, False, metadata,
+            error_message="Video file not found"
+        )
+        return False
+    
+    # Apply video preprocessing if needed (hook phrase and/or logo overlay)
+    # Note: Hook phrase and logo are not part of campaign metadata yet,
+    # but could be added in future enhancement
+    
+    # Load browser configuration
+    brave_path = os.getenv("BRAVE_PATH")
+    brave_user_data_dir = os.getenv("BRAVE_USER_DATA_DIR")
+    brave_profile_directory = os.getenv("BRAVE_PROFILE_DIRECTORY", "Default")
+    
+    credentials = {
+        "brave_path": brave_path,
+        "brave_user_data_dir": brave_user_data_dir,
+        "brave_profile_directory": brave_profile_directory
+    }
+    
+    # Extract metadata for upload
+    caption = metadata.get('caption', '')
+    hashtags_str = metadata.get('hashtags', '')
+    
+    # Convert hashtags string to list (space or comma separated)
+    if hashtags_str:
+        # Handle both comma-separated and space-separated hashtags
+        hashtags = [h.strip() for h in hashtags_str.replace(',', ' ').split() if h.strip()]
+    else:
+        hashtags = []
+    
+    # Record upload start
+    video_registry.record_upload_attempt(video_id, platform, "IN_PROGRESS")
+    audit.log_upload_event(video_id, platform, "uploading")
+    
+    # Initialize browser manager
+    browser_manager = None
+    try:
+        browser_manager = BraveBrowserManager.get_instance()
+        browser_manager.initialize(
+            brave_path=brave_path,
+            user_data_dir=brave_user_data_dir,
+            profile_directory=brave_profile_directory
+        )
+        
+        # Execute upload
+        upload_id = None
+        
+        if platform == "TikTok":
+            upload_id = upload_to_tiktok(video_file, caption, hashtags, credentials)
+        elif platform == "Instagram":
+            upload_id = upload_to_instagram(video_file, caption, hashtags, credentials)
+        elif platform == "YouTube":
+            # YouTube uses titles instead of captions
+            title = metadata.get('title', video.get('title', 'Untitled'))
+            upload_id = upload_to_youtube(video_file, title, hashtags, credentials)
+        else:
+            logger.error(f"Unknown platform: {platform}")
+            campaign_manager.record_campaign_upload(
+                campaign_id, video_id, platform, False, metadata,
+                error_message=f"Unknown platform: {platform}"
+            )
+            return False
+        
+        # Record result
+        if upload_id:
+            logger.info(f"Campaign upload successful: {upload_id}")
+            video_registry.record_upload_attempt(
+                video_id, platform, "SUCCESS",
+                platform_post_id=upload_id
+            )
+            campaign_manager.record_campaign_upload(
+                campaign_id, video_id, platform, True, metadata
+            )
+            audit.log_upload_event(video_id, platform, "success", upload_id)
+            return True
+        else:
+            logger.warning("Campaign upload failed (no ID returned)")
+            video_registry.record_upload_attempt(
+                video_id, platform, "FAILED",
+                error_message="Upload failed - no ID returned"
+            )
+            campaign_manager.record_campaign_upload(
+                campaign_id, video_id, platform, False, metadata,
+                error_message="Upload failed - no ID returned"
+            )
+            audit.log_upload_event(video_id, platform, "failed")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Campaign upload error: {str(e)}")
+        video_registry.record_upload_attempt(
+            video_id, platform, "FAILED",
+            error_message=str(e)
+        )
+        campaign_manager.record_campaign_upload(
+            campaign_id, video_id, platform, False, metadata,
+            error_message=str(e)
+        )
+        audit.log_upload_event(video_id, platform, "failed", error_message=str(e))
+        return False
+        
+    finally:
+        if browser_manager:
+            browser_manager.close()
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
