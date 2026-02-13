@@ -299,12 +299,6 @@ def _insert_text_into_draftjs(page: Page, selector: str, text: str, wait_after: 
             logger.error("DraftJS editor did not stabilize - cannot insert text safely")
             return False
         
-        # Wait for editor to be visible and ready
-        editor = page.wait_for_selector(selector, state="visible", timeout=30000)
-        if not editor:
-            logger.error("DraftJS editor not found")
-            return False
-        
         # Execute JavaScript to insert text properly into DraftJS
         success = page.evaluate("""
             (args) => {

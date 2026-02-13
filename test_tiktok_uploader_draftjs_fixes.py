@@ -44,7 +44,7 @@ def test_draftjs_stability_detection():
         'DraftEditor',
     ]
     
-    func_match = re.search(r'def _wait_for_draftjs_stable.*?(?=\ndef )', content, re.DOTALL)
+    func_match = re.search(r'def _wait_for_draftjs_stable.*?(?=\ndef |\Z)', content, re.DOTALL)
     if not func_match:
         logger.error("❌ FAIL: Could not extract _wait_for_draftjs_stable function")
         return False
@@ -77,7 +77,7 @@ def test_loading_icon_removed():
         content = f.read()
     
     # Extract _wait_for_post_button_ready function
-    func_match = re.search(r'def _wait_for_post_button_ready.*?(?=\ndef )', content, re.DOTALL)
+    func_match = re.search(r'def _wait_for_post_button_ready.*?(?=\ndef |\Z)', content, re.DOTALL)
     if not func_match:
         logger.error("❌ FAIL: Could not extract _wait_for_post_button_ready function")
         return False
@@ -112,7 +112,7 @@ def test_draftjs_stability_called_before_insert():
         content = f.read()
     
     # Extract _insert_text_into_draftjs function
-    func_match = re.search(r'def _insert_text_into_draftjs.*?(?=\ndef )', content, re.DOTALL)
+    func_match = re.search(r'def _insert_text_into_draftjs.*?(?=\ndef |\Z)', content, re.DOTALL)
     if not func_match:
         logger.error("❌ FAIL: Could not extract _insert_text_into_draftjs function")
         return False
