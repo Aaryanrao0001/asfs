@@ -216,10 +216,11 @@ class CampaignScheduler:
                     
                     if can_upload:
                         # Found a pending upload
-                        # Use campaign-specific metadata
+                        # Use campaign-specific metadata with fallbacks
+                        title = campaign_video.get('title') or video.get('title') or f"Video {video_id}"
                         metadata = {
                             'file_path': video.get('file_path'),
-                            'title': campaign_video.get('title') or video.get('title'),
+                            'title': title,
                             'caption': campaign_video.get('caption', ''),
                             'hashtags': campaign_video.get('hashtags', ''),
                             'duration': video.get('duration'),

@@ -281,20 +281,20 @@ class EditCampaignVideoDialog(QDialog):
         # Title
         layout.addWidget(QLabel("Title:"))
         self.title_input = QLineEdit()
-        self.title_input.setText(self.video_data.get('title', ''))
+        self.title_input.setText(self.video_data.get('title') or '')
         layout.addWidget(self.title_input)
         
         # Caption
         layout.addWidget(QLabel("Caption:"))
         self.caption_input = QTextEdit()
-        self.caption_input.setPlainText(self.video_data.get('caption', ''))
+        self.caption_input.setPlainText(self.video_data.get('caption') or '')
         self.caption_input.setMaximumHeight(100)
         layout.addWidget(self.caption_input)
         
         # Hashtags
         layout.addWidget(QLabel("Hashtags:"))
         self.hashtags_input = QLineEdit()
-        self.hashtags_input.setText(self.video_data.get('hashtags', ''))
+        self.hashtags_input.setText(self.video_data.get('hashtags') or '')
         layout.addWidget(self.hashtags_input)
         
         # Upload order
@@ -321,9 +321,9 @@ class EditCampaignVideoDialog(QDialog):
     def get_metadata(self):
         """Get updated metadata from form."""
         return {
-            "title": self.title_input.text().strip(),
-            "caption": self.caption_input.toPlainText().strip(),
-            "hashtags": self.hashtags_input.text().strip(),
+            "title": self.title_input.text().strip() or None,
+            "caption": self.caption_input.toPlainText().strip() or None,
+            "hashtags": self.hashtags_input.text().strip() or None,
             "upload_order": self.order_input.value()
         }
 
@@ -349,7 +349,7 @@ class CampaignsTab(QWidget):
         # Auto-refresh timer with longer interval to reduce overhead
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_campaigns)
-        self.refresh_timer.start(10000)  # Refresh every 10 seconds (reduced from 5)
+        self.refresh_timer.start(10000)  # Refresh every 10 seconds
     
     def init_ui(self):
         """Initialize the user interface."""
