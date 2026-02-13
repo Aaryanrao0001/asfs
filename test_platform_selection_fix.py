@@ -9,6 +9,25 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def extract_selected_platforms(upload_settings):
+    """
+    Helper function to extract selected platforms from upload settings.
+    
+    This simulates the logic in videos_tab.py upload_all_pending() method.
+    """
+    selected_platforms = []
+    platforms_config = upload_settings.get("platforms", {})
+    
+    if platforms_config.get("instagram"):
+        selected_platforms.append("Instagram")
+    if platforms_config.get("tiktok"):
+        selected_platforms.append("TikTok")
+    if platforms_config.get("youtube"):
+        selected_platforms.append("YouTube")
+    
+    return selected_platforms
+
+
 class TestPlatformSelection(unittest.TestCase):
     """Test platform selection in upload operations."""
     
@@ -23,16 +42,7 @@ class TestPlatformSelection(unittest.TestCase):
             }
         }
         
-        # Extract selected platforms (simulating the logic in videos_tab.py)
-        selected_platforms = []
-        platforms_config = upload_settings.get("platforms", {})
-        
-        if platforms_config.get("instagram"):
-            selected_platforms.append("Instagram")
-        if platforms_config.get("tiktok"):
-            selected_platforms.append("TikTok")
-        if platforms_config.get("youtube"):
-            selected_platforms.append("YouTube")
+        selected_platforms = extract_selected_platforms(upload_settings)
         
         # Should only have Instagram
         self.assertEqual(selected_platforms, ["Instagram"])
@@ -48,15 +58,7 @@ class TestPlatformSelection(unittest.TestCase):
             }
         }
         
-        selected_platforms = []
-        platforms_config = upload_settings.get("platforms", {})
-        
-        if platforms_config.get("instagram"):
-            selected_platforms.append("Instagram")
-        if platforms_config.get("tiktok"):
-            selected_platforms.append("TikTok")
-        if platforms_config.get("youtube"):
-            selected_platforms.append("YouTube")
+        selected_platforms = extract_selected_platforms(upload_settings)
         
         self.assertEqual(set(selected_platforms), {"Instagram", "TikTok"})
         self.assertEqual(len(selected_platforms), 2)
@@ -71,15 +73,7 @@ class TestPlatformSelection(unittest.TestCase):
             }
         }
         
-        selected_platforms = []
-        platforms_config = upload_settings.get("platforms", {})
-        
-        if platforms_config.get("instagram"):
-            selected_platforms.append("Instagram")
-        if platforms_config.get("tiktok"):
-            selected_platforms.append("TikTok")
-        if platforms_config.get("youtube"):
-            selected_platforms.append("YouTube")
+        selected_platforms = extract_selected_platforms(upload_settings)
         
         self.assertEqual(selected_platforms, [])
     
@@ -93,15 +87,7 @@ class TestPlatformSelection(unittest.TestCase):
             }
         }
         
-        selected_platforms = []
-        platforms_config = upload_settings.get("platforms", {})
-        
-        if platforms_config.get("instagram"):
-            selected_platforms.append("Instagram")
-        if platforms_config.get("tiktok"):
-            selected_platforms.append("TikTok")
-        if platforms_config.get("youtube"):
-            selected_platforms.append("YouTube")
+        selected_platforms = extract_selected_platforms(upload_settings)
         
         self.assertEqual(set(selected_platforms), {"Instagram", "TikTok", "YouTube"})
         self.assertEqual(len(selected_platforms), 3)
