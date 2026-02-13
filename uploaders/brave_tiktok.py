@@ -272,6 +272,142 @@ def _click_post_button_with_validation(page: Page, post_button, max_retries: int
     return False
 
 
+def _insert_text_into_draftjs(page: Page, selector: str, text: str, wait_after: bool = True) -> bool:
+    """
+    Insert text into DraftJS editor using proper InputEvent with insertFromPaste.
+    
+    This is the ONLY reliable way to insert text into TikTok's caption editor
+    because DraftJS listens specifically for beforeinput/input events with
+    insertFromPaste inputType. Regular typing or keyboard events only modify
+    the DOM but don't update React state, causing the post button to stay disabled.
+    
+    Args:
+        page: Playwright Page object
+        selector: CSS selector for the contenteditable DraftJS editor
+        text: Text to insert
+        wait_after: Whether to wait after insertion (default: True)
+        
+    Returns:
+        True if text was inserted successfully, False otherwise
+    """
+    try:
+        logger.info(f"Inserting text into DraftJS editor: {selector}")
+        
+        # Wait for editor to be visible and ready
+        editor = page.wait_for_selector(selector, state="visible", timeout=30000)
+        if not editor:
+            logger.error("DraftJS editor not found")
+            return False
+        
+        # Execute JavaScript to insert text properly into DraftJS
+        success = page.evaluate("""
+            (selector, text) => {
+                try {
+                    const editor = document.querySelector(selector);
+                    if (!editor) {
+                        console.error('Editor not found:', selector);
+                        return false;
+                    }
+                    
+                    // Focus the editor
+                    editor.focus();
+                    
+                    // Place caret at the end
+                    const range = document.createRange();
+                    range.selectNodeContents(editor);
+                    range.collapse(false);
+                    
+                    const sel = window.getSelection();
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    
+                    // Create DataTransfer for paste event
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.setData('text/plain', text);
+                    
+                    // Dispatch beforeinput event (DraftJS listens to this)
+                    const beforeInputEvent = new InputEvent('beforeinput', {
+                        inputType: 'insertFromPaste',
+                        data: text,
+                        dataTransfer: dataTransfer,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    editor.dispatchEvent(beforeInputEvent);
+                    
+                    // Use execCommand as fallback to ensure DOM is updated
+                    document.execCommand('insertText', false, text);
+                    
+                    // Dispatch input event for good measure
+                    const inputEvent = new InputEvent('input', {
+                        inputType: 'insertFromPaste',
+                        data: text,
+                        bubbles: true,
+                        cancelable: false
+                    });
+                    editor.dispatchEvent(inputEvent);
+                    
+                    console.log('Text inserted into DraftJS:', text.substring(0, 50));
+                    return true;
+                } catch (error) {
+                    console.error('Error inserting text:', error);
+                    return false;
+                }
+            }
+        """, selector, text)
+        
+        if success:
+            logger.info("Text successfully inserted into DraftJS editor")
+            if wait_after:
+                page.wait_for_timeout(1500)  # Give React time to update state
+            return True
+        else:
+            logger.error("Failed to insert text into DraftJS editor")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error inserting text into DraftJS: {e}")
+        return False
+
+
+def _wait_for_post_button_ready(page: Page, timeout: int = 600000) -> bool:
+    """
+    Wait for post button to be ready (not loading and description entered).
+    
+    This function ensures that:
+    1. Video processing is complete (no Loading icon)
+    2. Post button is visible
+    3. Description has been accepted by TikTok's React state
+    
+    Args:
+        page: Playwright Page object
+        timeout: Maximum wait time in milliseconds (default: 10 minutes)
+        
+    Returns:
+        True if button is ready, False otherwise
+    """
+    try:
+        logger.info("Waiting for post button to be ready (video processing + description)...")
+        
+        # Wait for both conditions:
+        # 1. Post button exists
+        # 2. No loading icon present
+        page.wait_for_function("""
+            () => {
+                const postButton = document.querySelector('[data-e2e="post_video_button"]');
+                const loadingIcon = document.querySelector('[data-icon="Loading"]');
+                return postButton && !loadingIcon;
+            }
+        """, timeout=timeout)
+        
+        logger.info("Post button is ready - no loading icon detected")
+        return True
+        
+    except Exception as e:
+        logger.warning(f"Timeout waiting for post button ready state: {e}")
+        return False
+
+
 def upload_to_tiktok_browser(
     video_path: str,
     title: str,
@@ -402,16 +538,26 @@ def upload_to_tiktok_browser(
                 logger.error(f"Caption box not visible: {e}")
                 raise Exception("Caption input not found after upload")
         
+        # CRITICAL: Wait for video processing to complete before entering caption
+        # TikTok resets the editor during encoding, so typing before completion causes caption loss
+        logger.info("Waiting for video processing completion before caption entry...")
+        if not _wait_for_post_button_ready(page, timeout=600000):
+            logger.warning("Timeout waiting for post button ready, proceeding anyway...")
+        
         # Fill in caption (title + description + tags)
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
         
-        logger.info("Filling caption with selector intelligence")
+        logger.info("Filling caption using DraftJS-compatible InputEvent method")
         caption_group = _tiktok_selectors.get_group("caption_input")
         
+        caption_inserted = False
+        
         if not caption_group:
-            # Legacy fallback
+            # Legacy fallback - try multiple selectors with DraftJS method
+            # Note: Selectors ordered from most specific to most generic for robustness against UI changes
             caption_selectors = [
                 'div.notranslate.public-DraftEditor-content[contenteditable="true"][role="combobox"]',
+                '[contenteditable="true"][role="combobox"]',
                 '[data-e2e="caption-input"]',
                 '[data-testid="video-caption"] div[contenteditable="true"]',
                 'div.caption-editor[contenteditable="true"]',
@@ -419,27 +565,26 @@ def upload_to_tiktok_browser(
                 'div[contenteditable="true"][placeholder*="caption" i]'
             ]
             
-            caption_found = False
             for selector in caption_selectors:
                 try:
                     element = page.query_selector(selector)
                     if element:
                         logger.info(f"Caption box found with selector: {selector}")
-                        browser.human_type(selector, full_caption)
-                        caption_found = True
-                        break
+                        if _insert_text_into_draftjs(page, selector, full_caption):
+                            caption_inserted = True
+                            break
                 except Exception as e:
                     logger.debug(f"Selector {selector} failed: {e}")
                     continue
             
-            if not caption_found:
-                logger.warning("Could not find caption input with specific selectors - upload may fail")
+            if not caption_inserted:
+                logger.warning("Could not find caption input with specific selectors")
                 try:
                     caption_selector = 'div[contenteditable="true"]'
                     logger.warning(f"Using generic selector as fallback: {caption_selector}")
-                    browser.human_type(caption_selector, full_caption)
-                except:
-                    logger.error("All caption selectors failed - caption not entered")
+                    caption_inserted = _insert_text_into_draftjs(page, caption_selector, full_caption)
+                except Exception as e:
+                    logger.error(f"All caption selectors failed: {e}")
         else:
             # Use selector intelligence
             selector_value, element = try_selectors_with_page(
@@ -451,34 +596,17 @@ def upload_to_tiktok_browser(
             
             if element:
                 logger.info(f"Caption input found with: {selector_value[:60]}")
-                browser.human_type(selector_value, full_caption)
+                caption_inserted = _insert_text_into_draftjs(page, selector_value, full_caption)
             else:
                 logger.error("Caption input not found with any selector")
-                raise Exception("Caption input not found")
         
-        browser.human_delay(2, 3)
+        if not caption_inserted:
+            logger.error("Failed to insert caption - post may fail")
+            raise Exception("Caption insertion failed")
         
-        # Commit caption - blur the caption element to ensure it's saved
-        logger.info("Committing caption...")
-        try:
-            # Try to blur the last used caption element
-            # Note: element variable should be in scope from caption filling above
-            try:
-                # Re-query the caption element for blur
-                caption_element = page.query_selector('div[contenteditable="true"]')
-                if caption_element:
-                    caption_element.evaluate("element => element.blur()")
-                    page.wait_for_timeout(1000)
-                    logger.info("Caption committed (blurred element)")
-                else:
-                    raise Exception("Caption element not found for blur")
-            except:
-                # Fallback: click body element to remove focus
-                page.evaluate("document.body.click()")
-                page.wait_for_timeout(1000)
-                logger.info("Caption committed (clicked body)")
-        except Exception as e:
-            logger.debug(f"Could not commit caption via blur: {e}")
+        # Give React time to process and validate the caption
+        page.wait_for_timeout(2000)
+        logger.info("Caption successfully inserted into DraftJS editor")
         
         # Optional: Set privacy to Public (usually default)
         # Selector may be: [data-e2e="privacy-select"]
@@ -823,16 +951,26 @@ def _upload_to_tiktok_with_manager(
                 logger.error(f"Caption box not visible: {e}")
                 raise Exception("Caption input not found after upload")
         
+        # CRITICAL: Wait for video processing to complete before entering caption
+        # TikTok resets the editor during encoding, so typing before completion causes caption loss
+        logger.info("Waiting for video processing completion before caption entry...")
+        if not _wait_for_post_button_ready(page, timeout=600000):
+            logger.warning("Timeout waiting for post button ready, proceeding anyway...")
+        
         # Fill in caption (title + description + tags)
         full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
         
-        logger.info("Filling caption with selector intelligence")
+        logger.info("Filling caption using DraftJS-compatible InputEvent method")
         caption_group = _tiktok_selectors.get_group("caption_input")
         
+        caption_inserted = False
+        
         if not caption_group:
-            # Legacy fallback
+            # Legacy fallback - try multiple selectors with DraftJS method
+            # Note: Selectors ordered from most specific to most generic for robustness against UI changes
             caption_selectors = [
                 'div.notranslate.public-DraftEditor-content[contenteditable="true"][role="combobox"]',
+                '[contenteditable="true"][role="combobox"]',
                 '[data-e2e="caption-input"]',
                 '[data-testid="video-caption"] div[contenteditable="true"]',
                 'div.caption-editor[contenteditable="true"]',
@@ -840,36 +978,26 @@ def _upload_to_tiktok_with_manager(
                 'div[contenteditable="true"][placeholder*="caption" i]'
             ]
             
-            caption_found = False
             for selector in caption_selectors:
                 try:
                     element = page.query_selector(selector)
                     if element:
                         logger.info(f"Caption box found with selector: {selector}")
-                        element.click()
-                        page.keyboard.press("Control+A")
-                        page.keyboard.press("Backspace")
-                        for char in full_caption:
-                            element.type(char, delay=random.uniform(50, 150))
-                        caption_found = True
-                        break
+                        if _insert_text_into_draftjs(page, selector, full_caption):
+                            caption_inserted = True
+                            break
                 except Exception as e:
                     logger.debug(f"Selector {selector} failed: {e}")
                     continue
             
-            if not caption_found:
-                logger.warning("Could not find caption input with specific selectors - upload may fail")
+            if not caption_inserted:
+                logger.warning("Could not find caption input with specific selectors")
                 try:
                     caption_selector = 'div[contenteditable="true"]'
                     logger.warning(f"Using generic selector as fallback: {caption_selector}")
-                    element = page.wait_for_selector(caption_selector, timeout=90000)
-                    element.click()
-                    page.keyboard.press("Control+A")
-                    page.keyboard.press("Backspace")
-                    for char in full_caption:
-                        element.type(char, delay=random.uniform(50, 150))
-                except:
-                    logger.error("All caption selectors failed - caption not entered")
+                    caption_inserted = _insert_text_into_draftjs(page, caption_selector, full_caption)
+                except Exception as e:
+                    logger.error(f"All caption selectors failed: {e}")
         else:
             # Use selector intelligence
             selector_value, element = try_selectors_with_page(
@@ -881,37 +1009,17 @@ def _upload_to_tiktok_with_manager(
             
             if element:
                 logger.info(f"Caption input found with: {selector_value[:60]}")
-                element.click()
-                page.keyboard.press("Control+A")
-                page.keyboard.press("Backspace")
-                for char in full_caption:
-                    element.type(char, delay=random.uniform(50, 150))
+                caption_inserted = _insert_text_into_draftjs(page, selector_value, full_caption)
             else:
                 logger.error("Caption input not found with any selector")
-                raise Exception("Caption input not found")
         
-        page.wait_for_timeout(random.randint(6000, 9000))
+        if not caption_inserted:
+            logger.error("Failed to insert caption - post may fail")
+            raise Exception("Caption insertion failed")
         
-        # Commit caption - blur the caption element to ensure it's saved
-        logger.info("Committing caption...")
-        try:
-            # Try to blur the caption element that was just used
-            try:
-                # Re-query the caption element for blur
-                caption_element = page.query_selector('div[contenteditable="true"]')
-                if caption_element:
-                    caption_element.evaluate("element => element.blur()")
-                    page.wait_for_timeout(1000)
-                    logger.info("Caption committed (blurred element)")
-                else:
-                    raise Exception("Caption element not found for blur")
-            except:
-                # Fallback: click body element to remove focus
-                page.evaluate("document.body.click()")
-                page.wait_for_timeout(1000)
-                logger.info("Caption committed (clicked body)")
-        except Exception as e:
-            logger.debug(f"Could not commit caption via blur: {e}")
+        # Give React time to process and validate the caption
+        page.wait_for_timeout(2000)
+        logger.info("Caption successfully inserted into DraftJS editor")
         
         # Click Post/Upload button with state validation
         # Use new helper function for robust clicking

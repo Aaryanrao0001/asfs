@@ -216,7 +216,7 @@ class BraveBrowserBase:
         except Exception as e:
             logger.warning(f"Failed to kill Brave processes: {e}")
     
-    def launch(self, headless: bool = False) -> Page:
+    def launch(self, headless: bool = False, max_retries: int = 3) -> Page:
         """
         Launch Brave browser using persistent context and return page.
         
@@ -226,9 +226,13 @@ class BraveBrowserBase:
         Args:
             headless: Run in headless mode (default: False, browser visible)
                      NOTE: headless=True will break Google login - use only for testing
+            max_retries: Maximum number of retry attempts (default: 3)
             
         Returns:
             Playwright Page object
+            
+        Raises:
+            Exception: If browser fails to launch after all retries
         """
         logger.info(f"Launching Brave browser: {self.brave_path}")
         
@@ -241,76 +245,103 @@ class BraveBrowserBase:
         # if self.user_data_dir:
         #     self._kill_brave_processes()
         
-        self.playwright = sync_playwright().start()
+        last_error = None
         
-        # Build launch arguments for anti-detection and compatibility
-        launch_args = [
-            "--disable-blink-features=AutomationControlled",  # Hide automation
-            "--start-maximized",  # Better UX
-            "--disable-brave-update",  # Prevent update popups
-            "--disable-features=BraveRewards",  # Disable rewards that might interfere
-        ]
-        
-        # CRITICAL: Use launch_persistent_context() to reuse real profile
-        # This is the ONLY way to maintain login sessions (Google, TikTok, etc.)
-        if self.user_data_dir:
-            # CORRECT: Construct full profile path BEFORE launch
-            # The user_data_dir should point to the PROFILE DIRECTORY, not the parent
-            # Windows: C:\Users\<USER>\AppData\Local\BraveSoftware\Brave-Browser\User Data\Default
-            # NOT: C:\Users\<USER>\AppData\Local\BraveSoftware\Brave-Browser\User Data
-            
-            profile_path = os.path.join(self.user_data_dir, self.profile_directory)
-            logger.info(f"Using FULL profile path: {profile_path}")
-            
-            # Persistent context with real profile
-            self.context = self.playwright.chromium.launch_persistent_context(
-                user_data_dir=profile_path,  # FULL PATH TO PROFILE
-                executable_path=self.brave_path,
-                headless=headless,
+        # Retry loop for browser launch (handles transient failures)
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    logger.info(f"Retrying browser launch (attempt {attempt + 1}/{max_retries})...")
+                    # Wait a bit before retrying
+                    time.sleep(2)
                 
-                # CRITICAL: Prevent Playwright from injecting bot-oriented defaults
-                # that break real Brave profiles
-                ignore_default_args=[
-                    "--disable-extensions",
-                    "--disable-component-extensions-with-background-pages",
-                    "--disable-background-networking",
-                    "--disable-sync",
-                ],
+                self.playwright = sync_playwright().start()
+        
+                # Build launch arguments for anti-detection and compatibility
+                launch_args = [
+                    "--disable-blink-features=AutomationControlled",  # Hide automation
+                    "--start-maximized",  # Better UX
+                    "--disable-brave-update",  # Prevent update popups
+                    "--disable-features=BraveRewards",  # Disable rewards that might interfere
+                ]
                 
-                args=launch_args,
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            )
-            
-            # Get or create page
-            if len(self.context.pages) > 0:
-                self.page = self.context.pages[0]
-            else:
-                self.page = self.context.new_page()
-        else:
-            # Fallback: regular launch without profile (will create temp profile)
-            logger.warning(
-                "No user_data_dir specified - using temporary profile.\n"
-                "This may cause login failures on Google and other platforms.\n"
-                "Specify user_data_dir and profile_directory for production use."
-            )
-            self.browser = self.playwright.chromium.launch(
-                executable_path=self.brave_path,
-                headless=headless,
-                args=launch_args,
-                ignore_default_args=["--no-sandbox"],
-            )
-            
-            self.context = self.browser.new_context(
-                viewport={"width": 1280, "height": 720},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
-            
-            self.page = self.context.new_page()
-        
-        logger.info("Brave browser launched successfully")
-        
-        return self.page
+                # CRITICAL: Use launch_persistent_context() to reuse real profile
+                # This is the ONLY way to maintain login sessions (Google, TikTok, etc.)
+                if self.user_data_dir:
+                    # CORRECT: Construct full profile path BEFORE launch
+                    # The user_data_dir should point to the PROFILE DIRECTORY, not the parent
+                    # Windows: C:\Users\<USER>\AppData\Local\BraveSoftware\Brave-Browser\User Data\Default
+                    # NOT: C:\Users\<USER>\AppData\Local\BraveSoftware\Brave-Browser\User Data
+                    
+                    profile_path = os.path.join(self.user_data_dir, self.profile_directory)
+                    logger.info(f"Using FULL profile path: {profile_path}")
+                    
+                    # Persistent context with real profile
+                    self.context = self.playwright.chromium.launch_persistent_context(
+                        user_data_dir=profile_path,  # FULL PATH TO PROFILE
+                        executable_path=self.brave_path,
+                        headless=headless,
+                        
+                        # CRITICAL: Prevent Playwright from injecting bot-oriented defaults
+                        # that break real Brave profiles
+                        ignore_default_args=[
+                            "--disable-extensions",
+                            "--disable-component-extensions-with-background-pages",
+                            "--disable-background-networking",
+                            "--disable-sync",
+                        ],
+                        
+                        args=launch_args,
+                        viewport={"width": 1920, "height": 1080},
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                    )
+                    
+                    # Get or create page
+                    if len(self.context.pages) > 0:
+                        self.page = self.context.pages[0]
+                    else:
+                        self.page = self.context.new_page()
+                else:
+                    # Fallback: regular launch without profile (will create temp profile)
+                    logger.warning(
+                        "No user_data_dir specified - using temporary profile.\n"
+                        "This may cause login failures on Google and other platforms.\n"
+                        "Specify user_data_dir and profile_directory for production use."
+                    )
+                    self.browser = self.playwright.chromium.launch(
+                        executable_path=self.brave_path,
+                        headless=headless,
+                        args=launch_args,
+                        ignore_default_args=["--no-sandbox"],
+                    )
+                    
+                    self.context = self.browser.new_context(
+                        viewport={"width": 1280, "height": 720},
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    )
+                    
+                    self.page = self.context.new_page()
+                
+                logger.info("Brave browser launched successfully")
+                return self.page
+                
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Browser launch attempt {attempt + 1} failed: {e}")
+                
+                # Clean up failed attempt
+                try:
+                    if hasattr(self, 'playwright') and self.playwright:
+                        self.playwright.stop()
+                        self.playwright = None
+                except Exception as cleanup_error:
+                    logger.debug(f"Error cleaning up after failed launch: {cleanup_error}")
+                
+                if attempt < max_retries - 1:
+                    continue
+                else:
+                    logger.error(f"Browser launch failed after {max_retries} attempts")
+                    raise Exception(f"Failed to launch browser after {max_retries} attempts. Last error: {last_error}")
     
     def _verify_profile_loaded(self, skip_navigation: bool = False) -> bool:
         """
