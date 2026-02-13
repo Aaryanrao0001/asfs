@@ -301,11 +301,11 @@ def _insert_text_into_draftjs(page: Page, selector: str, text: str, wait_after: 
         
         # Execute JavaScript to insert text properly into DraftJS
         success = page.evaluate("""
-            (selector, text) => {
+            (args) => {
                 try {
-                    const editor = document.querySelector(selector);
+                    const editor = document.querySelector(args.selector);
                     if (!editor) {
-                        console.error('Editor not found:', selector);
+                        console.error('Editor not found:', args.selector);
                         return false;
                     }
                     
@@ -323,12 +323,12 @@ def _insert_text_into_draftjs(page: Page, selector: str, text: str, wait_after: 
                     
                     // Create DataTransfer for paste event
                     const dataTransfer = new DataTransfer();
-                    dataTransfer.setData('text/plain', text);
+                    dataTransfer.setData('text/plain', args.text);
                     
                     // Dispatch beforeinput event (DraftJS listens to this)
                     const beforeInputEvent = new InputEvent('beforeinput', {
                         inputType: 'insertFromPaste',
-                        data: text,
+                        data: args.text,
                         dataTransfer: dataTransfer,
                         bubbles: true,
                         cancelable: true
@@ -336,25 +336,25 @@ def _insert_text_into_draftjs(page: Page, selector: str, text: str, wait_after: 
                     editor.dispatchEvent(beforeInputEvent);
                     
                     // Use execCommand as fallback to ensure DOM is updated
-                    document.execCommand('insertText', false, text);
+                    document.execCommand('insertText', false, args.text);
                     
                     // Dispatch input event for good measure
                     const inputEvent = new InputEvent('input', {
                         inputType: 'insertFromPaste',
-                        data: text,
+                        data: args.text,
                         bubbles: true,
                         cancelable: false
                     });
                     editor.dispatchEvent(inputEvent);
                     
-                    console.log('Text inserted into DraftJS:', text.substring(0, 50));
+                    console.log('Text inserted into DraftJS:', args.text.substring(0, 50));
                     return true;
                 } catch (error) {
                     console.error('Error inserting text:', error);
                     return false;
                 }
             }
-        """, selector, text)
+        """, {"selector": selector, "text": text})
         
         if success:
             logger.info("Text successfully inserted into DraftJS editor")
@@ -408,6 +408,100 @@ def _wait_for_post_button_ready(page: Page, timeout: int = 600000) -> bool:
         return False
 
 
+def _verify_page_loaded(page: Page, expected_elements: list, timeout: int = 10000) -> bool:
+    """
+    Verify that a page has loaded properly by checking for expected elements.
+    
+    Args:
+        page: Playwright Page object
+        expected_elements: List of CSS selectors that should be present on the page
+        timeout: Maximum wait time in milliseconds per element
+        
+    Returns:
+        True if all expected elements are found, False otherwise
+    """
+    try:
+        for selector in expected_elements:
+            try:
+                page.wait_for_selector(selector, timeout=timeout, state="attached")
+            except Exception:
+                logger.debug(f"Expected element not found: {selector}")
+                return False
+        return True
+    except Exception as e:
+        logger.debug(f"Error verifying page load: {e}")
+        return False
+
+
+def _navigate_with_retry(page: Page, url: str, max_retries: int = 3, verify_selectors: list = None) -> bool:
+    """
+    Navigate to a URL with retry logic and optional verification.
+    
+    Args:
+        page: Playwright Page object
+        url: URL to navigate to
+        max_retries: Maximum number of retry attempts
+        verify_selectors: Optional list of CSS selectors to verify page loaded correctly
+        
+    Returns:
+        True if navigation succeeded, False otherwise
+        
+    Raises:
+        Exception: If navigation fails after all retries
+    """
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                logger.info(f"Retrying navigation to {url} (attempt {attempt + 1}/{max_retries})...")
+                page.wait_for_timeout(2000)  # Wait before retry
+            
+            logger.info(f"Navigating to {url}")
+            page.goto(url, wait_until="domcontentloaded", timeout=180000)
+            
+            # Wait for network idle to ensure page is fully loaded
+            try:
+                page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                logger.debug("Network idle timeout, proceeding anyway")
+            
+            # Optional: Verify page loaded correctly
+            if verify_selectors:
+                page.wait_for_timeout(2000)  # Give page time to render
+                if not _verify_page_loaded(page, verify_selectors, timeout=15000):
+                    logger.warning(f"Page verification failed on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        logger.error("Page did not load properly after all retries")
+                        return False
+            
+            logger.info(f"Successfully navigated to {url}")
+            return True
+            
+        except Exception as e:
+            last_error = e
+            error_msg = str(e).lower()
+            logger.warning(f"Navigation attempt {attempt + 1} failed: {e}")
+            
+            # Check for network errors
+            if "net::" in error_msg or "timeout" in error_msg:
+                if attempt < max_retries - 1:
+                    continue
+                else:
+                    for msg in TIKTOK_NETWORK_ERROR_MESSAGES:
+                        logger.error(msg)
+                    raise Exception(f"Network error: Cannot reach {url} after {max_retries} attempts - {last_error}")
+            else:
+                if attempt < max_retries - 1:
+                    continue
+                else:
+                    raise Exception(f"Navigation failed after {max_retries} attempts: {last_error}")
+    
+    return False
+
+
 def upload_to_tiktok_browser(
     video_path: str,
     title: str,
@@ -441,18 +535,24 @@ def upload_to_tiktok_browser(
         browser = BraveBrowserBase(brave_path, user_data_dir, profile_directory)
         page = browser.launch(headless=False)
         
-        # Navigate to TikTok upload page with network error handling
+        # Navigate to TikTok upload page with retry logic and verification
         logger.info("Navigating to TikTok upload page")
-        try:
-            page.goto("https://www.tiktok.com/upload", wait_until="domcontentloaded", timeout=180000)
-        except Exception as nav_error:
-            error_msg = str(nav_error).lower()
-            if "net::" in error_msg or "timeout" in error_msg:
-                for msg in TIKTOK_NETWORK_ERROR_MESSAGES:
-                    logger.error(msg)
-                raise Exception(f"Network error: Cannot reach TikTok upload page - {nav_error}")
-            else:
-                raise
+        
+        # Define expected elements that should be present on the upload page
+        # These help verify the page loaded correctly
+        verify_selectors = [
+            'input[type="file"]',  # File upload input
+            'body',  # Basic page structure
+        ]
+        
+        # Use retry navigation with verification
+        if not _navigate_with_retry(
+            page, 
+            "https://www.tiktok.com/upload", 
+            max_retries=3,
+            verify_selectors=verify_selectors
+        ):
+            raise Exception("Failed to navigate to TikTok upload page after retries")
         
         browser.human_delay(2, 4)
         
@@ -505,11 +605,18 @@ def upload_to_tiktok_browser(
         
         # CRITICAL: Wait for load state after file upload to detect navigation/modals
         try:
-            page.wait_for_load_state("networkidle", timeout=20000)
+            page.wait_for_load_state("networkidle", timeout=30000)
             logger.debug("Network idle after file upload")
         except Exception:
             logger.debug("Network idle timeout after upload, using fallback delay")
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(8000)
+        
+        # Additional verification: Check if we're still on the upload page
+        if "upload" not in page.url.lower():
+            logger.warning(f"Unexpected navigation after upload to: {page.url}")
+            # Try to navigate back to upload page
+            if not _navigate_with_retry(page, "https://www.tiktok.com/upload", max_retries=2):
+                raise Exception("Lost upload page after file selection")
         
         # Wait for video processing to complete - look for actual UI signals
         # Use new state validation helper
