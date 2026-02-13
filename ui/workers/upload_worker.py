@@ -48,6 +48,8 @@ class UploadWorker(QThread):
             error_msg = str(e)
             logger.error(f"Upload error: {self.video_id} to {self.platform} - {error_msg}")
             self.upload_error.emit(self.video_id, self.platform, error_msg)
+            # CRITICAL: Always emit finish signal to prevent Qt thread destruction crash
+            self.upload_finished.emit(self.video_id, self.platform, False)
 
 
 class BulkUploadWorker(QThread):

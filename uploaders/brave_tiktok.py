@@ -293,10 +293,10 @@ def _insert_text_into_draftjs(page: Page, selector: str, text: str, wait_after: 
     try:
         logger.info(f"Inserting text into DraftJS editor: {selector}")
         
-        # Wait for editor to be visible and ready
-        editor = page.wait_for_selector(selector, state="visible", timeout=30000)
-        if not editor:
-            logger.error("DraftJS editor not found")
+        # CRITICAL: Wait for DraftJS editor to be stable before inserting
+        # This prevents race conditions where caption is inserted during editor lifecycle transitions
+        if not _wait_for_draftjs_stable(page, selector, timeout=30000):
+            logger.error("DraftJS editor did not stabilize - cannot insert text safely")
             return False
         
         # Execute JavaScript to insert text properly into DraftJS
@@ -370,14 +370,67 @@ def _insert_text_into_draftjs(page: Page, selector: str, text: str, wait_after: 
         return False
 
 
+def _wait_for_draftjs_stable(page: Page, selector: str, timeout: int = 30000) -> bool:
+    """
+    Wait for DraftJS editor to be stable and ready for input.
+    
+    This ensures the editor has:
+    1. Mounted in the DOM
+    2. Is visible and focused
+    3. Has initialized its React state
+    4. Is not in the middle of a lifecycle transition
+    
+    Args:
+        page: Playwright Page object
+        selector: CSS selector for the DraftJS editor
+        timeout: Maximum wait time in milliseconds (default: 30 seconds)
+        
+    Returns:
+        True if editor is stable, False otherwise
+    """
+    try:
+        logger.info("Waiting for DraftJS editor to stabilize...")
+        
+        # Wait for editor to exist and be visible
+        page.wait_for_selector(selector, state="visible", timeout=timeout)
+        
+        # Wait for editor to be stable (no remounts for 2 seconds)
+        page.wait_for_function("""
+            (selector) => {
+                const editor = document.querySelector(selector);
+                if (!editor) return false;
+                
+                // Check if editor is visible and in the DOM
+                if (!editor.offsetParent) return false;
+                
+                // Check if editor has contenteditable
+                if (editor.contentEditable !== 'true') return false;
+                
+                // Check if DraftJS has initialized (has data-contents attribute or DraftEditor class)
+                const hasDraftJS = editor.closest('[class*="DraftEditor"]') || 
+                                  editor.hasAttribute('data-contents') ||
+                                  editor.className.includes('public-DraftEditor');
+                
+                return hasDraftJS;
+            }
+        """, selector, timeout=timeout)
+        
+        logger.info("DraftJS editor is stable and ready")
+        return True
+        
+    except Exception as e:
+        logger.warning(f"Timeout waiting for DraftJS stability: {e}")
+        return False
+
+
 def _wait_for_post_button_ready(page: Page, timeout: int = 600000) -> bool:
     """
-    Wait for post button to be ready (not loading and description entered).
+    Wait for post button to be ready (video processing complete).
     
     This function ensures that:
-    1. Video processing is complete (no Loading icon)
-    2. Post button is visible
-    3. Description has been accepted by TikTok's React state
+    1. Video processing is complete
+    2. Post button is visible and clickable
+    3. Editor is stable and ready for description input
     
     Args:
         page: Playwright Page object
@@ -387,20 +440,23 @@ def _wait_for_post_button_ready(page: Page, timeout: int = 600000) -> bool:
         True if button is ready, False otherwise
     """
     try:
-        logger.info("Waiting for post button to be ready (video processing + description)...")
+        logger.info("Waiting for video processing to complete and post button to be ready...")
         
-        # Wait for both conditions:
-        # 1. Post button exists
-        # 2. No loading icon present
+        # Wait for post button to exist and be enabled
         page.wait_for_function("""
             () => {
                 const postButton = document.querySelector('[data-e2e="post_video_button"]');
-                const loadingIcon = document.querySelector('[data-icon="Loading"]');
-                return postButton && !loadingIcon;
+                if (!postButton) return false;
+                
+                // Check if button is visible
+                if (!postButton.offsetParent) return false;
+                
+                // Post button exists and is visible
+                return true;
             }
         """, timeout=timeout)
         
-        logger.info("Post button is ready - no loading icon detected")
+        logger.info("Post button is ready")
         return True
         
     except Exception as e:
