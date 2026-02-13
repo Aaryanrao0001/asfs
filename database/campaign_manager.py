@@ -364,9 +364,9 @@ class CampaignManager:
             ''', (
                 campaign_id,
                 video_id,
-                title or "",
-                caption or "",
-                hashtags or "",
+                title,  # Keep None to store NULL in database
+                caption,  # Keep None to store NULL in database
+                hashtags,  # Keep None to store NULL in database
                 datetime.now().isoformat(),
                 upload_order
             ))

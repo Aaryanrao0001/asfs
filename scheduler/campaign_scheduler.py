@@ -23,6 +23,9 @@ class CampaignScheduler:
     - Runs continuously in background thread
     """
     
+    # Class constants
+    CHECK_INTERVAL_SECONDS = 60  # How often to check for pending uploads
+    
     def __init__(self):
         """Initialize the campaign scheduler."""
         self.running = False
@@ -94,7 +97,7 @@ class CampaignScheduler:
                 
                 if not active_campaigns:
                     logger.debug("No active campaigns with scheduling enabled")
-                    time.sleep(60)  # Check every minute
+                    time.sleep(self.CHECK_INTERVAL_SECONDS)
                     continue
                 
                 # Process each campaign independently
@@ -137,11 +140,11 @@ class CampaignScheduler:
                                 )
                 
                 # Sleep for a short interval before checking again
-                time.sleep(60)  # Check every minute
+                time.sleep(self.CHECK_INTERVAL_SECONDS)
                 
             except Exception as e:
                 logger.error(f"Error in campaign scheduler loop: {e}")
-                time.sleep(60)
+                time.sleep(self.CHECK_INTERVAL_SECONDS)
         
         logger.info("Campaign scheduler loop ended")
     

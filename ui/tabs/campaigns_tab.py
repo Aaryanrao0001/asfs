@@ -346,10 +346,10 @@ class CampaignsTab(QWidget):
         self.scheduler_running = False
         self.init_ui()
         
-        # Auto-refresh timer
+        # Auto-refresh timer with longer interval to reduce overhead
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_campaigns)
-        self.refresh_timer.start(5000)  # Refresh every 5 seconds
+        self.refresh_timer.start(10000)  # Refresh every 10 seconds (reduced from 5)
     
     def init_ui(self):
         """Initialize the user interface."""
