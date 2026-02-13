@@ -26,8 +26,14 @@ logger = logging.getLogger(__name__)
 def test_campaign_system():
     """Test the complete campaign management system."""
     
-    # Use test database
+    # Use test database in database/ directory for inspection after test
+    # This is intentionally persistent to allow manual inspection
     test_db = "database/test_campaigns.db"
+    
+    # Remove old test database if it exists
+    if os.path.exists(test_db):
+        os.remove(test_db)
+        logger.info(f"Removed old test database: {test_db}")
     
     # Initialize database
     logger.info("=" * 80)
