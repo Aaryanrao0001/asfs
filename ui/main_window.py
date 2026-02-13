@@ -15,6 +15,7 @@ from .tabs.metadata_tab import MetadataTab
 from .tabs.upload_tab import UploadTab
 from .tabs.run_tab import RunTab
 from .tabs.videos_tab import VideosTab
+from .tabs.campaigns_tab import CampaignsTab
 from .workers.pipeline_worker import PipelineWorker
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
         self.metadata_tab = MetadataTab()
         self.upload_tab = UploadTab()
         self.videos_tab = VideosTab()
+        self.campaigns_tab = CampaignsTab()
         self.run_tab = RunTab()
         
         # Add tabs
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.metadata_tab, "📝 Metadata")
         self.tabs.addTab(self.upload_tab, "🚀 Upload")
         self.tabs.addTab(self.videos_tab, "🎬 Videos")
+        self.tabs.addTab(self.campaigns_tab, "📋 Campaigns")
         self.tabs.addTab(self.run_tab, "▶️ Run & Monitor")
         
         self.setCentralWidget(self.tabs)
