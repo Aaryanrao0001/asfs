@@ -2,11 +2,22 @@
 
 A **fully automated web application** that transforms long-form videos into viral-worthy short clips optimized for TikTok, Instagram Reels, and YouTube Shorts.
 
+## ✨ What's New in v2.1
+
+**🎯 Multi-Campaign Management System** (NEW!)
+- Create and manage multiple independent upload campaigns
+- Campaign-specific metadata (captions, hashtags, titles)
+- Randomized caption/title selection per upload
+- Independent scheduling and execution
+- Real-time campaign tracking and analytics
+- Pause/resume/cancel campaigns in-flight
+- See [CAMPAIGNS_GUIDE.md](CAMPAIGNS_GUIDE.md) for complete guide
+
 ## ✨ What's New in v2.0
 
 **🌐 Web-Based UI with VaultMatrix Design**
 - Modern React 18+ web interface with cybersecurity aesthetic
-- Flask REST API backend for seamless integration
+- FastAPI REST API backend for seamless integration
 - Glassmorphism design with premium green accents
 - Real-time pipeline monitoring with live log streaming
 - Responsive design for desktop, tablet, and mobile
@@ -14,7 +25,7 @@ A **fully automated web application** that transforms long-form videos into vira
 
 **🖥️ Redesigned Architecture**
 - React frontend with component-based architecture
-- Flask backend serving REST API endpoints
+- FastAPI backend serving REST API endpoints
 - Server-Sent Events (SSE) for live log streaming
 - Persistent settings management
 - Video registry with upload tracking
@@ -51,6 +62,7 @@ This system intelligently:
 - **Extracts** platform-optimized short videos (9:16 aspect ratio)
 - **Generates** captions and hashtags
 - **Uploads** to TikTok, Instagram Reels, and YouTube Shorts via browser automation
+- **Manages** multi-campaign uploads with independent scheduling
 - **Provides** a beautiful web UI for the entire workflow
 
 **This is a real production system** — fully implemented, no placeholders, no mock data.
@@ -242,6 +254,74 @@ The web application has 6 tabs:
   - Copy logs to clipboard
   - Save logs to file
   - Auto-scroll to latest logs
+
+---
+
+## 🎯 Multi-Campaign Management
+
+The campaign management system allows you to organize and execute multiple independent video upload campaigns with ease.
+
+### Key Features
+
+- **Create Multiple Campaigns**: Organize videos into separate campaigns (e.g., "Summer Launch", "Tutorial Series")
+- **Campaign-Specific Metadata**: Each campaign has its own captions, hashtags, and titles
+- **Randomized Content**: Use comma-separated values for captions/titles that are randomly selected per upload
+- **Independent Scheduling**: Configure delays, platforms, and timing per campaign
+- **Real-Time Control**: Pause, resume, or cancel campaigns in-flight
+- **Upload Tracking**: Monitor success/failure rates and analytics per campaign
+- **Platform Targeting**: Select different platforms for each campaign (Instagram, TikTok, YouTube)
+
+### Quick Example
+
+```bash
+# Create a campaign
+curl -X POST http://localhost:5000/api/campaigns \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Product Launch Q1",
+    "description": "New product promotional videos"
+  }'
+
+# Configure metadata with randomization
+curl -X PUT http://localhost:5000/api/campaigns/{campaign_id} \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metadata": {
+      "caption_mode": "randomized",
+      "captions": "New arrivals!, Fresh styles!, Must-see collection!",
+      "hashtags": "fashion,newcollection,style",
+      "add_hashtag_prefix": true
+    },
+    "schedule": {
+      "platforms": ["Instagram", "TikTok"],
+      "delay_seconds": 300
+    }
+  }'
+
+# Execute campaign
+curl -X POST http://localhost:5000/api/campaigns/{campaign_id}/execute
+```
+
+### Use Cases
+
+1. **Product Launch**: 10 videos with varied captions across Instagram & TikTok
+2. **Tutorial Series**: Educational content with consistent branding to YouTube
+3. **Parallel Campaigns**: Run morning motivation posts and tech reviews simultaneously
+
+### API Endpoints
+
+- `POST /api/campaigns` - Create campaign
+- `GET /api/campaigns` - List all campaigns
+- `GET /api/campaigns/{id}` - Get campaign details
+- `PUT /api/campaigns/{id}` - Update campaign
+- `DELETE /api/campaigns/{id}` - Delete campaign
+- `POST /api/campaigns/{id}/execute` - Start campaign execution
+- `POST /api/campaigns/{id}/pause` - Pause active campaign
+- `POST /api/campaigns/{id}/resume` - Resume paused campaign
+- `GET /api/campaigns/{id}/status` - Get execution status
+- `GET /api/campaigns/{id}/analytics` - Get campaign analytics
+
+For detailed usage, examples, and troubleshooting, see **[CAMPAIGNS_GUIDE.md](CAMPAIGNS_GUIDE.md)**.
 
 ---
 
