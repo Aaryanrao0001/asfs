@@ -65,6 +65,9 @@ class MainWindow(QMainWindow):
         
         # Set metadata callback for videos tab
         self.videos_tab.set_metadata_callback(lambda: self.metadata_tab.get_settings())
+        
+        # Set upload settings callback for videos tab
+        self.videos_tab.set_upload_settings_callback(lambda: self.upload_tab.get_settings())
     
     def init_workers(self):
         """Initialize background workers."""
