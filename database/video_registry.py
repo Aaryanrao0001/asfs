@@ -475,3 +475,26 @@ class VideoRegistry:
             return -1
         finally:
             conn.close()
+    
+    def list_videos(self) -> List[Dict]:
+        """
+        List all registered videos.
+        
+        Returns:
+            List of video dictionaries
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('SELECT * FROM videos ORDER BY created_at DESC')
+            videos = []
+            for row in cursor.fetchall():
+                videos.append(dict(row))
+            return videos
+        except Exception as e:
+            logger.error(f"Failed to list videos: {e}")
+            return []
+        finally:
+            conn.close()

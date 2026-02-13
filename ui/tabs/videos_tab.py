@@ -32,6 +32,7 @@ class VideosTab(QWidget):
         self.video_registry = VideoRegistry()
         self.upload_workers = []  # Track active upload workers
         self.metadata_callback = None  # Callback to get metadata settings from parent
+        self.upload_settings_callback = None  # Callback to get upload settings from parent
         self.init_ui()
         
         # Auto-refresh timer
@@ -47,6 +48,15 @@ class VideosTab(QWidget):
             callback: Function that returns metadata settings dict
         """
         self.metadata_callback = callback
+    
+    def set_upload_settings_callback(self, callback):
+        """
+        Set callback to get upload settings from parent window.
+        
+        Args:
+            callback: Function that returns upload settings dict
+        """
+        self.upload_settings_callback = callback
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -578,27 +588,55 @@ class VideosTab(QWidget):
         self.refresh_videos()
     
     def upload_all_pending(self):
-        """Upload all videos with pending uploads to all platforms using background worker."""
+        """Upload all videos with pending uploads to selected platforms using background worker."""
+        # Get selected platforms from upload settings
+        selected_platforms = []
+        if self.upload_settings_callback:
+            try:
+                upload_settings = self.upload_settings_callback()
+                platforms_config = upload_settings.get("platforms", {})
+                
+                if platforms_config.get("instagram"):
+                    selected_platforms.append("Instagram")
+                if platforms_config.get("tiktok"):
+                    selected_platforms.append("TikTok")
+                if platforms_config.get("youtube"):
+                    selected_platforms.append("YouTube")
+            except Exception as e:
+                logger.error(f"Error getting upload settings: {e}")
+                # Fallback to all platforms if error
+                selected_platforms = ["Instagram", "TikTok", "YouTube"]
+        else:
+            # Fallback to all platforms if no callback
+            selected_platforms = ["Instagram", "TikTok", "YouTube"]
+        
+        if not selected_platforms:
+            QMessageBox.warning(
+                self,
+                "No Platforms Selected",
+                "Please select at least one platform in the Upload tab before uploading."
+            )
+            return
+        
         reply = QMessageBox.question(
             self,
             "Confirm Bulk Upload",
-            "Upload all videos to all platforms where they haven't been uploaded yet?",
+            f"Upload all videos to selected platforms ({', '.join(selected_platforms)}) where they haven't been uploaded yet?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
             videos = self.video_registry.get_all_videos()
-            platforms = ["Instagram", "TikTok", "YouTube"]
             
-            # Collect upload tasks
+            # Collect upload tasks for selected platforms only
             upload_tasks = []
             
             for video in videos:
                 video_id = video['id']
                 uploads = video.get('uploads', {})
                 
-                for platform in platforms:
+                for platform in selected_platforms:
                     # Check if not already uploaded
                     if platform not in uploads or uploads[platform].get('status') != 'SUCCESS':
                         # Check if upload is allowed
@@ -611,7 +649,7 @@ class VideosTab(QWidget):
                 QMessageBox.information(
                     self,
                     "No Uploads Needed",
-                    "All videos are already uploaded to all platforms."
+                    f"All videos are already uploaded to the selected platforms ({', '.join(selected_platforms)})."
                 )
                 return
             
@@ -629,7 +667,7 @@ class VideosTab(QWidget):
             
             # Start worker
             worker.start()
-            logger.info(f"Started bulk upload: {len(upload_tasks)} tasks")
+            logger.info(f"Started bulk upload: {len(upload_tasks)} tasks to {selected_platforms}")
     
     def on_bulk_upload_started(self, video_id: str, platform: str):
         """Handle bulk upload task start."""
