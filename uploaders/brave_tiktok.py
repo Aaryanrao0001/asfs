@@ -554,6 +554,7 @@ def upload_to_tiktok_browser(
         
         if not caption_group:
             # Legacy fallback - try multiple selectors with DraftJS method
+            # Note: Selectors ordered from most specific to most generic for robustness against UI changes
             caption_selectors = [
                 'div.notranslate.public-DraftEditor-content[contenteditable="true"][role="combobox"]',
                 '[contenteditable="true"][role="combobox"]',
@@ -966,6 +967,7 @@ def _upload_to_tiktok_with_manager(
         
         if not caption_group:
             # Legacy fallback - try multiple selectors with DraftJS method
+            # Note: Selectors ordered from most specific to most generic for robustness against UI changes
             caption_selectors = [
                 'div.notranslate.public-DraftEditor-content[contenteditable="true"][role="combobox"]',
                 '[contenteditable="true"][role="combobox"]',

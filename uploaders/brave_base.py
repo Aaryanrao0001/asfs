@@ -253,7 +253,6 @@ class BraveBrowserBase:
                 if attempt > 0:
                     logger.info(f"Retrying browser launch (attempt {attempt + 1}/{max_retries})...")
                     # Wait a bit before retrying
-                    import time
                     time.sleep(2)
                 
                 self.playwright = sync_playwright().start()
