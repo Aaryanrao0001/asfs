@@ -335,12 +335,15 @@ class CampaignsTab(QWidget):
     campaign_created = Signal(int)  # campaign_id
     campaign_updated = Signal(int)  # campaign_id
     campaign_deleted = Signal(int)  # campaign_id
+    start_campaign_scheduler = Signal()  # Request to start campaign scheduler
+    stop_campaign_scheduler = Signal()  # Request to stop campaign scheduler
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.campaign_manager = CampaignManager()
         self.video_registry = VideoRegistry()
         self.selected_campaign_id = None
+        self.scheduler_running = False
         self.init_ui()
         
         # Auto-refresh timer
@@ -390,6 +393,11 @@ class CampaignsTab(QWidget):
         self.refresh_btn.setProperty("secondary", True)
         self.refresh_btn.clicked.connect(self.refresh_campaigns)
         controls_h_layout.addWidget(self.refresh_btn)
+        
+        # Scheduler control button
+        self.scheduler_btn = QPushButton("▶️ Start Campaign Scheduler")
+        self.scheduler_btn.clicked.connect(self.toggle_campaign_scheduler)
+        controls_h_layout.addWidget(self.scheduler_btn)
         
         controls_h_layout.addStretch()
         
@@ -738,3 +746,47 @@ class CampaignsTab(QWidget):
                 self.refresh_campaigns()
             else:
                 QMessageBox.critical(self, "Error", "Failed to delete campaign.")
+    
+    def toggle_campaign_scheduler(self):
+        """Toggle campaign scheduler on/off."""
+        if self.scheduler_running:
+            # Stop scheduler
+            self.stop_campaign_scheduler.emit()
+            self.scheduler_running = False
+            self.scheduler_btn.setText("▶️ Start Campaign Scheduler")
+            QMessageBox.information(
+                self,
+                "Scheduler Stopped",
+                "Campaign scheduler has been stopped."
+            )
+        else:
+            # Check if there are any active campaigns with scheduling enabled
+            campaigns = self.campaign_manager.list_campaigns(active_only=True)
+            scheduled_campaigns = [c for c in campaigns if c.get('schedule_enabled')]
+            
+            if not scheduled_campaigns:
+                QMessageBox.warning(
+                    self,
+                    "No Scheduled Campaigns",
+                    "No active campaigns have scheduling enabled.\n\n"
+                    "Please create a campaign and enable automatic scheduling in the campaign settings."
+                )
+                return
+            
+            # Start scheduler
+            self.start_campaign_scheduler.emit()
+            self.scheduler_running = True
+            self.scheduler_btn.setText("⏸️ Stop Campaign Scheduler")
+            QMessageBox.information(
+                self,
+                "Scheduler Started",
+                f"Campaign scheduler is now running for {len(scheduled_campaigns)} campaign(s)."
+            )
+    
+    def set_scheduler_running(self, running: bool):
+        """Update scheduler running state from parent."""
+        self.scheduler_running = running
+        if running:
+            self.scheduler_btn.setText("⏸️ Stop Campaign Scheduler")
+        else:
+            self.scheduler_btn.setText("▶️ Start Campaign Scheduler")

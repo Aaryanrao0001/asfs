@@ -89,6 +89,20 @@ class MainWindow(QMainWindow):
                 def start(self): logger.warning("Scheduler not available")
                 def stop(self): pass
             self.scheduler = DummyScheduler()
+        
+        # Initialize campaign scheduler
+        try:
+            from scheduler import get_campaign_scheduler
+            self.campaign_scheduler = get_campaign_scheduler()
+            self.campaign_scheduler.set_upload_callback(self.execute_scheduled_upload)
+            logger.info("Campaign scheduler initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize campaign scheduler: {e}")
+            class DummyCampaignScheduler:
+                def is_running(self): return False
+                def start(self): logger.warning("Campaign scheduler not available")
+                def stop(self): pass
+            self.campaign_scheduler = DummyCampaignScheduler()
     
     def connect_signals(self):
         """Connect all UI signals to handlers."""
@@ -108,6 +122,10 @@ class MainWindow(QMainWindow):
         self.upload_tab.settings_changed.connect(self.on_upload_settings_changed)
         self.upload_tab.start_scheduler_requested.connect(self.on_start_scheduler)
         self.upload_tab.stop_scheduler_requested.connect(self.on_stop_scheduler)
+        
+        # Campaigns tab
+        self.campaigns_tab.start_campaign_scheduler.connect(self.on_start_campaign_scheduler)
+        self.campaigns_tab.stop_campaign_scheduler.connect(self.on_stop_campaign_scheduler)
         
         # Run tab
         self.run_tab.run_clicked.connect(self.on_run_pipeline)
@@ -227,6 +245,24 @@ class MainWindow(QMainWindow):
             # Update UI
             self.upload_tab.update_scheduler_status(False)
     
+    def on_start_campaign_scheduler(self):
+        """Handle start campaign scheduler request."""
+        if not self.campaign_scheduler.is_running():
+            self.campaign_scheduler.start()
+            logger.info("Campaign scheduler started by user")
+            
+            # Update UI
+            self.campaigns_tab.set_scheduler_running(True)
+    
+    def on_stop_campaign_scheduler(self):
+        """Handle stop campaign scheduler request."""
+        if self.campaign_scheduler.is_running():
+            self.campaign_scheduler.stop()
+            logger.info("Campaign scheduler stopped by user")
+            
+            # Update UI
+            self.campaigns_tab.set_scheduler_running(False)
+    
     def execute_scheduled_upload(self, video_id: str, platform: str, metadata: dict) -> bool:
         """
         Execute a scheduled upload (called by scheduler).
@@ -240,9 +276,6 @@ class MainWindow(QMainWindow):
             True if upload succeeded, False otherwise
         """
         try:
-            # Get current metadata settings from UI
-            metadata_settings = self.metadata_tab.get_settings()
-            
             # Get upload settings for browser configuration
             upload_settings = self.upload_tab.get_settings()
             
@@ -255,29 +288,44 @@ class MainWindow(QMainWindow):
             if upload_settings.get("profile_directory"):
                 os.environ["BRAVE_PROFILE_DIRECTORY"] = upload_settings["profile_directory"]
             
-            # Merge with video metadata
-            from metadata import MetadataConfig
-            from metadata.resolver import resolve_metadata
-            
-            # Create metadata config from UI settings
-            config = MetadataConfig.from_ui_values(
-                mode=metadata_settings.get("mode", "uniform"),
-                title_input=metadata_settings.get("title", ""),
-                description_input=metadata_settings.get("description", ""),
-                caption_input=metadata_settings.get("caption", ""),
-                tags_input=metadata_settings.get("tags", ""),
-                hashtag_prefix=metadata_settings.get("hashtag_prefix", True),
-                hook_phrase=metadata_settings.get("hook_phrase", ""),
-                hook_position=metadata_settings.get("hook_position", "Top Left"),
-                logo_path=metadata_settings.get("logo_path", "")
-            )
-            
-            # Resolve metadata for this upload
-            resolved = resolve_metadata(config)
+            # Check if this is a campaign upload (has campaign_id in metadata)
+            if metadata and metadata.get('campaign_id'):
+                # Use campaign-specific metadata
+                logger.info(f"Campaign upload: {metadata.get('campaign_name')} - {video_id} to {platform}")
+                upload_metadata = {
+                    'title': metadata.get('title', ''),
+                    'caption': metadata.get('caption', ''),
+                    'tags': metadata.get('hashtags', ''),
+                    'file_path': metadata.get('file_path'),
+                    'hook_phrase': metadata.get('hook_phrase', ''),
+                    'logo_path': metadata.get('logo_path', '')
+                }
+            else:
+                # Use UI metadata settings (for regular scheduler)
+                metadata_settings = self.metadata_tab.get_settings()
+                
+                from metadata import MetadataConfig
+                from metadata.resolver import resolve_metadata
+                
+                # Create metadata config from UI settings
+                config = MetadataConfig.from_ui_values(
+                    mode=metadata_settings.get("mode", "uniform"),
+                    title_input=metadata_settings.get("title", ""),
+                    description_input=metadata_settings.get("description", ""),
+                    caption_input=metadata_settings.get("caption", ""),
+                    tags_input=metadata_settings.get("tags", ""),
+                    hashtag_prefix=metadata_settings.get("hashtag_prefix", True),
+                    hook_phrase=metadata_settings.get("hook_phrase", ""),
+                    hook_position=metadata_settings.get("hook_position", "Top Left"),
+                    logo_path=metadata_settings.get("logo_path", "")
+                )
+                
+                # Resolve metadata for this upload
+                upload_metadata = resolve_metadata(config)
             
             # Execute upload
             from pipeline import run_upload_stage
-            success = run_upload_stage(video_id, platform, resolved)
+            success = run_upload_stage(video_id, platform, upload_metadata)
             
             return success
             
