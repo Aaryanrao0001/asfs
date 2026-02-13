@@ -103,6 +103,8 @@ class MainWindow(QMainWindow):
         
         # Upload tab
         self.upload_tab.settings_changed.connect(self.on_upload_settings_changed)
+        self.upload_tab.start_scheduler_requested.connect(self.on_start_scheduler)
+        self.upload_tab.stop_scheduler_requested.connect(self.on_stop_scheduler)
         
         # Run tab
         self.run_tab.run_clicked.connect(self.on_run_pipeline)
@@ -144,8 +146,16 @@ class MainWindow(QMainWindow):
         logger.debug(f"Upload settings changed: {settings}")
         self.save_settings()
         
-        # Update scheduler configuration
-        enable_scheduling = settings.get("enable_scheduling", False)
+        # Set environment variables for browser configuration
+        # This ensures pipeline.py can access UI-configured browser settings
+        if settings.get("brave_path"):
+            os.environ["BRAVE_PATH"] = settings["brave_path"]
+        if settings.get("user_data_dir"):
+            os.environ["BRAVE_USER_DATA_DIR"] = settings["user_data_dir"]
+        if settings.get("profile_directory"):
+            os.environ["BRAVE_PROFILE_DIRECTORY"] = settings["profile_directory"]
+        
+        # Update scheduler configuration (but don't auto-start)
         upload_gap_hours = settings.get("upload_gap_hours", 1)
         upload_gap_minutes = settings.get("upload_gap_minutes", 0)
         
@@ -159,20 +169,60 @@ class MainWindow(QMainWindow):
         if platforms_config.get("youtube"):
             enabled_platforms.append("YouTube")
         
-        # Configure scheduler
+        # Configure scheduler (this does not start it)
         self.scheduler.configure(
             upload_gap_hours=upload_gap_hours,
             upload_gap_minutes=upload_gap_minutes,
             platforms=enabled_platforms
         )
-        
-        # Start or stop scheduler based on setting
-        if enable_scheduling and not self.scheduler.is_running():
+    
+    def on_start_scheduler(self):
+        """Handle manual start scheduler request."""
+        if not self.scheduler.is_running():
+            # Get current upload settings
+            settings = self.upload_tab.get_settings()
+            upload_gap_hours = settings.get("upload_gap_hours", 1)
+            upload_gap_minutes = settings.get("upload_gap_minutes", 0)
+            
+            # Get selected platforms
+            platforms_config = settings.get("platforms", {})
+            enabled_platforms = []
+            if platforms_config.get("instagram"):
+                enabled_platforms.append("Instagram")
+            if platforms_config.get("tiktok"):
+                enabled_platforms.append("TikTok")
+            if platforms_config.get("youtube"):
+                enabled_platforms.append("YouTube")
+            
+            if not enabled_platforms:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "No Platforms Selected",
+                    "Please select at least one platform before starting the scheduler."
+                )
+                return
+            
+            # Configure and start scheduler
+            self.scheduler.configure(
+                upload_gap_hours=upload_gap_hours,
+                upload_gap_minutes=upload_gap_minutes,
+                platforms=enabled_platforms
+            )
             self.scheduler.start()
-            logger.info("Auto-scheduler started")
-        elif not enable_scheduling and self.scheduler.is_running():
+            logger.info("Scheduler started manually by user")
+            
+            # Update UI
+            self.upload_tab.update_scheduler_status(True)
+    
+    def on_stop_scheduler(self):
+        """Handle manual stop scheduler request."""
+        if self.scheduler.is_running():
             self.scheduler.stop()
-            logger.info("Auto-scheduler stopped")
+            logger.info("Scheduler stopped manually by user")
+            
+            # Update UI
+            self.upload_tab.update_scheduler_status(False)
     
     def execute_scheduled_upload(self, video_id: str, platform: str, metadata: dict) -> bool:
         """
@@ -189,6 +239,18 @@ class MainWindow(QMainWindow):
         try:
             # Get current metadata settings from UI
             metadata_settings = self.metadata_tab.get_settings()
+            
+            # Get upload settings for browser configuration
+            upload_settings = self.upload_tab.get_settings()
+            
+            # Set environment variables for browser configuration
+            # This ensures pipeline.py uses the UI-configured browser settings
+            if upload_settings.get("brave_path"):
+                os.environ["BRAVE_PATH"] = upload_settings["brave_path"]
+            if upload_settings.get("user_data_dir"):
+                os.environ["BRAVE_USER_DATA_DIR"] = upload_settings["user_data_dir"]
+            if upload_settings.get("profile_directory"):
+                os.environ["BRAVE_PROFILE_DIRECTORY"] = upload_settings["profile_directory"]
             
             # Merge with video metadata
             from metadata import MetadataConfig
@@ -361,6 +423,14 @@ class MainWindow(QMainWindow):
                     self.metadata_tab.set_settings(settings["metadata"])
                 if "upload" in settings:
                     self.upload_tab.set_settings(settings["upload"])
+                    # Also set environment variables from upload settings
+                    upload_settings = settings["upload"]
+                    if upload_settings.get("brave_path"):
+                        os.environ["BRAVE_PATH"] = upload_settings["brave_path"]
+                    if upload_settings.get("user_data_dir"):
+                        os.environ["BRAVE_USER_DATA_DIR"] = upload_settings["user_data_dir"]
+                    if upload_settings.get("profile_directory"):
+                        os.environ["BRAVE_PROFILE_DIRECTORY"] = upload_settings["profile_directory"]
                 
                 logger.info("Settings loaded")
         except Exception as e:
@@ -370,6 +440,11 @@ class MainWindow(QMainWindow):
         """Handle window close event."""
         # Save settings
         self.save_settings()
+        
+        # Stop scheduler if running
+        if self.scheduler.is_running():
+            logger.info("Stopping scheduler on app close...")
+            self.scheduler.stop()
         
         # Stop workers
         if self.pipeline_worker.isRunning():

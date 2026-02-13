@@ -902,9 +902,11 @@ def upload_to_instagram_browser(
 # Backward compatibility wrapper
 def upload_to_instagram(
     video_path: str,
-    caption: str,
-    hashtags: list,
-    credentials: dict
+    title: str = "",
+    description: str = "",
+    caption: str = "",
+    hashtags: list = None,
+    credentials: dict = None
 ) -> Optional[str]:
     """
     Upload to Instagram (browser-based).
@@ -912,24 +914,57 @@ def upload_to_instagram(
     This maintains API compatibility with the old API-based uploader.
     Now uses BraveBrowserManager if available for shared browser context.
     
+    Supports both old and new calling conventions:
+    - Old: upload_to_instagram(path, caption, hashtags, credentials)
+    - New: upload_to_instagram(path, title, description, caption, hashtags, credentials)
+    
     Args:
         video_path: Path to video file
-        caption: Video caption
-        hashtags: List of hashtags
+        title: Video title (used in caption composition) or legacy caption parameter
+        description: Video description (used in caption composition) or legacy hashtags parameter  
+        caption: Video caption (primary text) or legacy credentials parameter
+        hashtags: List of hashtags (or None for legacy mode)
         credentials: Dictionary with optional brave_path and profile_path
         
     Returns:
         Upload ID/result if successful, None if failed
     """
+    # Handle legacy calling convention: upload_to_instagram(path, caption_str, hashtags_list, creds_dict)
+    if hashtags is None and isinstance(caption, dict):
+        # Legacy mode: (path, caption, hashtags, credentials)
+        credentials = caption
+        hashtags = description if isinstance(description, list) else []
+        caption = title
+        title = ""
+        description = ""
+    elif credentials is None and isinstance(hashtags, dict):
+        # Semi-legacy mode: (path, title, caption, hashtags, credentials)
+        credentials = hashtags
+        hashtags = caption if isinstance(caption, list) else []
+        caption = description
+        description = ""
+    
     from .brave_manager import BraveBrowserManager
     
     # Extract browser settings from credentials
+    credentials = credentials or {}
+    hashtags = hashtags or []
     brave_path = credentials.get("brave_path")
     user_data_dir = credentials.get("brave_user_data_dir")
     profile_directory = credentials.get("brave_profile_directory", "Default")
     
     # Format hashtags
     tags = " ".join(hashtags) if hashtags else ""
+    
+    # Use caption if provided, otherwise fall back to title/description
+    if not caption:
+        # Fallback: if caption is empty, compose from title and description
+        caption = f"{title}\n\n{description}".strip()
+    
+    # For Instagram, use caption as both title and description  
+    # (Instagram doesn't have separate title field)
+    final_title = title or caption[:100]
+    final_description = description or caption
     
     # Check if BraveBrowserManager is initialized (pipeline mode)
     manager = BraveBrowserManager.get_instance()
@@ -938,8 +973,8 @@ def upload_to_instagram(
         logger.info("Using shared browser context from BraveBrowserManager")
         return _upload_to_instagram_with_manager(
             video_path=video_path,
-            title=caption[:100],
-            description=caption,
+            title=final_title,
+            description=final_description,
             tags=tags
         )
     else:
@@ -947,8 +982,8 @@ def upload_to_instagram(
         logger.info("Using standalone browser mode")
         return upload_to_instagram_browser(
             video_path=video_path,
-            title=caption[:100],
-            description=caption,
+            title=final_title,
+            description=final_description,
             tags=tags,
             brave_path=brave_path,
             user_data_dir=user_data_dir,

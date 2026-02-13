@@ -230,9 +230,11 @@ def upload_to_youtube_browser(
 # Backward compatibility wrapper
 def upload_to_youtube(
     video_path: str,
-    caption: str,
-    hashtags: list,
-    credentials: dict
+    title: str = "",
+    description: str = "",
+    caption: str = "",
+    hashtags: list = None,
+    credentials: dict = None
 ) -> Optional[str]:
     """
     Upload to YouTube Shorts (browser-based).
@@ -240,24 +242,51 @@ def upload_to_youtube(
     This maintains API compatibility with the old API-based uploader.
     Now uses BraveBrowserManager if available for shared browser context.
     
+    Supports both old and new calling conventions:
+    - Old: upload_to_youtube(path, caption, hashtags, credentials)
+    - New: upload_to_youtube(path, title, description, caption, hashtags, credentials)
+    
     Args:
         video_path: Path to video file
-        caption: Video caption (used as description)
-        hashtags: List of hashtags
+        title: Video title or legacy caption parameter
+        description: Video description or legacy hashtags parameter
+        caption: Video caption (fallback if title/description empty) or legacy credentials parameter
+        hashtags: List of hashtags (or None for legacy mode)
         credentials: Dictionary with optional brave_path and profile_path
         
     Returns:
         Upload ID/result if successful, None if failed
     """
+    # Handle legacy calling convention: upload_to_youtube(path, caption_str, hashtags_list, creds_dict)
+    if hashtags is None and isinstance(caption, dict):
+        # Legacy mode: (path, caption, hashtags, credentials)
+        credentials = caption
+        hashtags = description if isinstance(description, list) else []
+        caption = title
+        title = ""
+        description = ""
+    elif credentials is None and isinstance(hashtags, dict):
+        # Semi-legacy mode: (path, title, caption, hashtags, credentials)
+        credentials = hashtags
+        hashtags = caption if isinstance(caption, list) else []
+        caption = description
+        description = ""
+    
     from .brave_manager import BraveBrowserManager
     
     # Extract browser settings from credentials
+    credentials = credentials or {}
+    hashtags = hashtags or []
     brave_path = credentials.get("brave_path")
     user_data_dir = credentials.get("brave_user_data_dir")
     profile_directory = credentials.get("brave_profile_directory", "Default")
     
     # Format hashtags
     tags = " ".join(hashtags) if hashtags else ""
+    
+    # Use title and description if provided, otherwise fall back to caption
+    final_title = title if title else (caption[:100] if caption else "")
+    final_description = description if description else caption
     
     # Check if BraveBrowserManager is initialized (pipeline mode)
     manager = BraveBrowserManager.get_instance()
@@ -266,8 +295,8 @@ def upload_to_youtube(
         logger.info("Using shared browser context from BraveBrowserManager")
         return _upload_to_youtube_with_manager(
             video_path=video_path,
-            title=caption[:100],
-            description=caption,
+            title=final_title,
+            description=final_description,
             tags=tags
         )
     else:
@@ -275,8 +304,8 @@ def upload_to_youtube(
         logger.info("Using standalone browser mode")
         return upload_to_youtube_browser(
             video_path=video_path,
-            title=caption[:100],  # YouTube title limit is 100 chars
-            description=caption,
+            title=final_title,
+            description=final_description,
             tags=tags,
             brave_path=brave_path,
             user_data_dir=user_data_dir,

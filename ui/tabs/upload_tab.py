@@ -17,6 +17,8 @@ class UploadTab(QWidget):
     
     # Signals
     settings_changed = Signal(dict)
+    start_scheduler_requested = Signal()
+    stop_scheduler_requested = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -182,10 +184,30 @@ class UploadTab(QWidget):
         schedule_group = QGroupBox("Auto-Schedule & Background Upload")
         schedule_layout = QVBoxLayout(schedule_group)
         
-        self.enable_scheduling = QCheckBox("Enable Auto-Scheduling")
-        self.enable_scheduling.setChecked(False)
-        self.enable_scheduling.stateChanged.connect(self.on_settings_changed)
-        schedule_layout.addWidget(self.enable_scheduling)
+        # Scheduler status and controls
+        status_h_layout = QHBoxLayout()
+        status_h_layout.addWidget(QLabel("Scheduler Status:"))
+        self.scheduler_status_label = QLabel("Stopped")
+        self.scheduler_status_label.setProperty("status", True)
+        status_h_layout.addWidget(self.scheduler_status_label)
+        status_h_layout.addStretch()
+        schedule_layout.addLayout(status_h_layout)
+        
+        # Start/Stop buttons
+        buttons_h_layout = QHBoxLayout()
+        self.start_scheduler_btn = QPushButton("▶ Start Scheduler")
+        self.start_scheduler_btn.setProperty("success", True)
+        self.start_scheduler_btn.setMinimumHeight(35)
+        buttons_h_layout.addWidget(self.start_scheduler_btn)
+        
+        self.stop_scheduler_btn = QPushButton("⏹ Stop Scheduler")
+        self.stop_scheduler_btn.setProperty("danger", True)
+        self.stop_scheduler_btn.setEnabled(False)
+        self.stop_scheduler_btn.setMinimumHeight(35)
+        buttons_h_layout.addWidget(self.stop_scheduler_btn)
+        
+        buttons_h_layout.addStretch()
+        schedule_layout.addLayout(buttons_h_layout)
         
         # Time gap between uploads
         gap_h_layout = QHBoxLayout()
@@ -209,7 +231,7 @@ class UploadTab(QWidget):
         
         schedule_layout.addLayout(gap_h_layout)
         
-        schedule_hint = QLabel("App will automatically upload videos at set intervals in the background")
+        schedule_hint = QLabel("Manually start the scheduler to upload videos at set intervals in the background")
         schedule_hint.setProperty("subheading", True)
         schedule_hint.setWordWrap(True)
         schedule_layout.addWidget(schedule_hint)
@@ -222,6 +244,10 @@ class UploadTab(QWidget):
         # Set scroll area content
         scroll.setWidget(content)
         main_layout.addWidget(scroll)
+        
+        # Connect button signals
+        self.start_scheduler_btn.clicked.connect(self.on_start_scheduler)
+        self.stop_scheduler_btn.clicked.connect(self.on_stop_scheduler)
     
     def get_default_brave_path(self) -> str:
         """Get default Brave browser path for current platform."""
@@ -399,7 +425,6 @@ class UploadTab(QWidget):
             "profile_directory": self.profile_directory.currentText(),
             "min_delay": self.min_delay.value(),
             "max_delay": self.max_delay.value(),
-            "enable_scheduling": self.enable_scheduling.isChecked(),
             "upload_gap_hours": self.upload_gap_hours.value(),
             "upload_gap_minutes": self.upload_gap_minutes.value()
         }
@@ -428,11 +453,29 @@ class UploadTab(QWidget):
         if "max_delay" in settings:
             self.max_delay.setValue(settings["max_delay"])
         
-        if "enable_scheduling" in settings:
-            self.enable_scheduling.setChecked(settings["enable_scheduling"])
-        
         if "upload_gap_hours" in settings:
             self.upload_gap_hours.setValue(settings["upload_gap_hours"])
         
         if "upload_gap_minutes" in settings:
             self.upload_gap_minutes.setValue(settings["upload_gap_minutes"])
+    
+    def on_start_scheduler(self):
+        """Handle start scheduler button click."""
+        self.start_scheduler_requested.emit()
+    
+    def on_stop_scheduler(self):
+        """Handle stop scheduler button click."""
+        self.stop_scheduler_requested.emit()
+    
+    def update_scheduler_status(self, is_running: bool):
+        """Update the scheduler status display."""
+        if is_running:
+            self.scheduler_status_label.setText("Running")
+            self.scheduler_status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+            self.start_scheduler_btn.setEnabled(False)
+            self.stop_scheduler_btn.setEnabled(True)
+        else:
+            self.scheduler_status_label.setText("Stopped")
+            self.scheduler_status_label.setStyleSheet("color: #888; font-weight: bold;")
+            self.start_scheduler_btn.setEnabled(True)
+            self.stop_scheduler_btn.setEnabled(False)
