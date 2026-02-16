@@ -1,5 +1,6 @@
 """
-Videos Tab - Video registry and upload management interface.
+Videos Tab - Ultra-modern video registry and upload management interface.
+Uber-style design with cards, smooth animations, and advanced features.
 """
 
 import os
@@ -8,10 +9,11 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
-    QGroupBox, QMessageBox, QAbstractItemView, QFileDialog, QScrollArea
+    QGroupBox, QMessageBox, QAbstractItemView, QFileDialog, QScrollArea,
+    QLineEdit, QComboBox, QSpinBox, QDialog, QDialogButtonBox, QFrame
 )
-from PySide6.QtCore import Signal, Qt, QTimer
-from PySide6.QtGui import QPixmap, QIcon
+from PySide6.QtCore import Signal, Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint
+from PySide6.QtGui import QPixmap, QIcon, QColor
 import subprocess
 
 from database import VideoRegistry
@@ -20,8 +22,277 @@ from ..workers.upload_worker import UploadWorker, BulkUploadWorker
 logger = logging.getLogger(__name__)
 
 
+class ToastNotification(QWidget):
+    """Toast notification widget that appears at the top of the screen."""
+    
+    def __init__(self, message: str, notification_type: str = "info", parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        
+        # Setup UI
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 15)
+        
+        # Icon based on type
+        icons = {
+            "success": "✅",
+            "error": "❌",
+            "warning": "⚠️",
+            "info": "ℹ️"
+        }
+        icon_label = QLabel(icons.get(notification_type, "ℹ️"))
+        icon_label.setStyleSheet("font-size: 20px;")
+        layout.addWidget(icon_label)
+        
+        # Message
+        message_label = QLabel(message)
+        message_label.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 500;")
+        message_label.setWordWrap(False)
+        layout.addWidget(message_label)
+        
+        # Styling based on type
+        colors = {
+            "success": "background-color: rgba(16, 185, 129, 0.95);",
+            "error": "background-color: rgba(239, 68, 68, 0.95);",
+            "warning": "background-color: rgba(245, 158, 11, 0.95);",
+            "info": "background-color: rgba(59, 130, 246, 0.95);"
+        }
+        
+        self.setStyleSheet(f"""
+            QWidget {{
+                {colors.get(notification_type, colors["info"])}
+                border-radius: 12px;
+                padding: 5px;
+            }}
+        """)
+        
+        # Auto-hide timer
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.fade_out)
+        self.timer.setSingleShot(True)
+        
+        # Fade out animation
+        self.fade_animation = QPropertyAnimation(self, b"windowOpacity")
+        self.fade_animation.setDuration(500)
+        self.fade_animation.setStartValue(1.0)
+        self.fade_animation.setEndValue(0.0)
+        self.fade_animation.setEasingCurve(QEasingCurve.InOutQuad)
+        self.fade_animation.finished.connect(self.close)
+    
+    def show_notification(self, duration: int = 3000):
+        """Show the notification for a specified duration."""
+        self.show()
+        self.timer.start(duration)
+    
+    def fade_out(self):
+        """Fade out the notification."""
+        self.fade_animation.start()
+
+
+
+class EditTitleDialog(QDialog):
+    """Dialog for editing video title."""
+    
+    def __init__(self, current_title: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Video Title")
+        self.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(self)
+        
+        # Title input
+        layout.addWidget(QLabel("New Title:"))
+        self.title_input = QLineEdit(current_title)
+        self.title_input.selectAll()
+        layout.addWidget(self.title_input)
+        
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+    
+    def get_title(self) -> str:
+        """Get the entered title."""
+        return self.title_input.text().strip()
+
+
+class VideoDetailsDialog(QDialog):
+    """Dialog showing detailed video information."""
+    
+    def __init__(self, video: dict, video_registry: VideoRegistry, parent=None):
+        super().__init__(parent)
+        self.video = video
+        self.video_registry = video_registry
+        self.setWindowTitle(f"Video Details - {video.get('title', 'Untitled')}")
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(500)
+        
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize the dialog UI."""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+        
+        # Title section
+        title_label = QLabel(self.video.get('title', 'Untitled'))
+        title_label.setProperty("heading", True)
+        layout.addWidget(title_label)
+        
+        # Info grid
+        info_group = QGroupBox("📋 Video Information")
+        info_layout = QVBoxLayout(info_group)
+        
+        # Video ID
+        id_layout = QHBoxLayout()
+        id_layout.addWidget(QLabel("ID:"))
+        id_value = QLabel(self.video.get('id', 'N/A'))
+        id_value.setProperty("subheading", True)
+        id_layout.addWidget(id_value)
+        id_layout.addStretch()
+        info_layout.addLayout(id_layout)
+        
+        # File path
+        path_layout = QHBoxLayout()
+        path_layout.addWidget(QLabel("File Path:"))
+        path_value = QLabel(self.video.get('file_path', 'N/A'))
+        path_value.setProperty("subheading", True)
+        path_value.setWordWrap(True)
+        path_layout.addWidget(path_value)
+        path_layout.addStretch()
+        info_layout.addLayout(path_layout)
+        
+        # Duration
+        duration_layout = QHBoxLayout()
+        duration_layout.addWidget(QLabel("Duration:"))
+        duration = self.video.get('duration', 0)
+        if duration > 0:
+            mins, secs = divmod(int(duration), 60)
+            duration_text = f"{mins}:{secs:02d} ({duration:.1f}s)"
+        else:
+            duration_text = "N/A"
+        duration_value = QLabel(duration_text)
+        duration_value.setProperty("subheading", True)
+        duration_layout.addWidget(duration_value)
+        duration_layout.addStretch()
+        info_layout.addLayout(duration_layout)
+        
+        # File size
+        file_size_layout = QHBoxLayout()
+        file_size_layout.addWidget(QLabel("File Size:"))
+        file_size = self.video_registry.get_file_size(self.video.get('id'))
+        size_text = self.format_file_size(file_size) if file_size else "N/A"
+        size_value = QLabel(size_text)
+        size_value.setProperty("subheading", True)
+        file_size_layout.addWidget(size_value)
+        file_size_layout.addStretch()
+        info_layout.addLayout(file_size_layout)
+        
+        # Created at
+        created_layout = QHBoxLayout()
+        created_layout.addWidget(QLabel("Added:"))
+        created_value = QLabel(self.video.get('created_at', 'N/A'))
+        created_value.setProperty("subheading", True)
+        created_layout.addWidget(created_value)
+        created_layout.addStretch()
+        info_layout.addLayout(created_layout)
+        
+        # Duplicate allowed
+        dup_layout = QHBoxLayout()
+        dup_layout.addWidget(QLabel("Duplicate Uploads:"))
+        dup_allowed = "Enabled" if self.video.get('duplicate_allowed') else "Disabled"
+        dup_value = QLabel(dup_allowed)
+        dup_value.setProperty("subheading", True)
+        dup_layout.addWidget(dup_value)
+        dup_layout.addStretch()
+        info_layout.addLayout(dup_layout)
+        
+        layout.addWidget(info_group)
+        
+        # Upload status section
+        uploads_group = QGroupBox("📤 Upload Status")
+        uploads_layout = QVBoxLayout(uploads_group)
+        
+        uploads = self.video.get('uploads', {})
+        
+        if not uploads:
+            no_uploads_label = QLabel("No uploads yet")
+            no_uploads_label.setProperty("subheading", True)
+            uploads_layout.addWidget(no_uploads_label)
+        else:
+            for platform in ['Instagram', 'TikTok', 'YouTube']:
+                upload_info = uploads.get(platform)
+                
+                platform_layout = QHBoxLayout()
+                platform_label = QLabel(f"{platform}:")
+                platform_label.setMinimumWidth(100)
+                platform_layout.addWidget(platform_label)
+                
+                if upload_info:
+                    status = upload_info.get('status', 'UNKNOWN')
+                    status_label = QLabel(self.get_status_text(status))
+                    
+                    if status == 'SUCCESS':
+                        status_label.setProperty("status", "success")
+                    elif status in ['FAILED', 'FAILED_FINAL']:
+                        status_label.setProperty("status", "error")
+                    elif status == 'IN_PROGRESS':
+                        status_label.setProperty("status", "running")
+                    
+                    platform_layout.addWidget(status_label)
+                    
+                    # Post ID if available
+                    if upload_info.get('post_id'):
+                        post_id_label = QLabel(f"Post ID: {upload_info['post_id']}")
+                        post_id_label.setProperty("subheading", True)
+                        platform_layout.addWidget(post_id_label)
+                else:
+                    not_uploaded = QLabel("Not uploaded")
+                    not_uploaded.setProperty("subheading", True)
+                    platform_layout.addWidget(not_uploaded)
+                
+                platform_layout.addStretch()
+                uploads_layout.addLayout(platform_layout)
+        
+        layout.addWidget(uploads_group)
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+    
+    def format_file_size(self, size_bytes: int) -> str:
+        """Format file size in human-readable format."""
+        if size_bytes is None:
+            return "N/A"
+        
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f} PB"
+    
+    def get_status_text(self, status: str) -> str:
+        """Get human-readable status text."""
+        status_map = {
+            'SUCCESS': '✅ Uploaded',
+            'FAILED': '❌ Failed',
+            'FAILED_FINAL': '❌ Failed (Final)',
+            'IN_PROGRESS': '⏳ In Progress',
+            'BLOCKED': '🚫 Blocked',
+            'RATE_LIMITED': '🔄 Rate Limited',
+            'PENDING': '⏸️ Pending'
+        }
+        return status_map.get(status, f'❓ {status}')
+
+
 class VideosTab(QWidget):
-    """Tab for video registry and upload management."""
+    """Tab for video registry and upload management with ultra-modern UI."""
     
     # Signals
     upload_requested = Signal(str, str)  # video_id, platform
@@ -33,12 +304,49 @@ class VideosTab(QWidget):
         self.upload_workers = []  # Track active upload workers
         self.metadata_callback = None  # Callback to get metadata settings from parent
         self.upload_settings_callback = None  # Callback to get upload settings from parent
+        self.current_filter = ""  # Current search filter
+        self.current_sort_column = 0  # Current sort column
+        self.current_sort_order = Qt.AscendingOrder  # Current sort order
+        self.notifications = []  # Track active notifications
         self.init_ui()
         
         # Auto-refresh timer
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_videos)
         self.refresh_timer.start(5000)  # Refresh every 5 seconds
+    
+    def show_notification(self, message: str, notification_type: str = "info", duration: int = 3000):
+        """
+        Show a toast notification.
+        
+        Args:
+            message: Notification message
+            notification_type: Type of notification (success, error, warning, info)
+            duration: How long to show the notification in milliseconds
+        """
+        # Create notification
+        notification = ToastNotification(message, notification_type, self)
+        
+        # Position at top center of the tab
+        notification.adjustSize()
+        parent_rect = self.rect()
+        x = parent_rect.center().x() - notification.width() // 2
+        y = 20  # 20px from top
+        notification.move(x, y)
+        
+        # Show notification
+        notification.show_notification(duration)
+        
+        # Track notification
+        self.notifications.append(notification)
+        
+        # Clean up after it closes
+        QTimer.singleShot(duration + 600, lambda: self._cleanup_notification(notification))
+    
+    def _cleanup_notification(self, notification):
+        """Remove notification from tracking list."""
+        if notification in self.notifications:
+            self.notifications.remove(notification)
     
     def set_metadata_callback(self, callback):
         """
@@ -59,7 +367,7 @@ class VideosTab(QWidget):
         self.upload_settings_callback = callback
     
     def init_ui(self):
-        """Initialize the user interface."""
+        """Initialize the ultra-modern user interface."""
         # Create main layout with scroll area
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -73,41 +381,91 @@ class VideosTab(QWidget):
         # Create content widget
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(20)
+        layout.setContentsMargins(32, 32, 32, 32)
+        
+        # Header section with title and stats
+        header_layout = QHBoxLayout()
         
         # Title
-        title = QLabel("Video Registry & Upload Management")
+        title = QLabel("Video Library")
         title.setProperty("heading", True)
-        layout.addWidget(title)
+        header_layout.addWidget(title)
         
-        # Control buttons
-        controls_h_layout = QHBoxLayout()
+        header_layout.addStretch()
+        
+        # Stats
+        self.stats_label = QLabel("0 videos")
+        self.stats_label.setProperty("subheading", True)
+        header_layout.addWidget(self.stats_label)
+        
+        layout.addLayout(header_layout)
+        
+        # Search and filter bar
+        search_filter_layout = QHBoxLayout()
+        search_filter_layout.setSpacing(12)
+        
+        # Search box
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("🔍 Search videos by name...")
+        self.search_box.textChanged.connect(self.on_search_changed)
+        self.search_box.setMinimumHeight(42)
+        search_filter_layout.addWidget(self.search_box, stretch=3)
+        
+        # Sort dropdown
+        sort_label = QLabel("Sort by:")
+        search_filter_layout.addWidget(sort_label)
+        
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems([
+            "Title (A-Z)", "Title (Z-A)",
+            "Duration (Short)", "Duration (Long)",
+            "Date Added (Newest)", "Date Added (Oldest)"
+        ])
+        self.sort_combo.currentIndexChanged.connect(self.on_sort_changed)
+        self.sort_combo.setMinimumHeight(42)
+        search_filter_layout.addWidget(self.sort_combo, stretch=2)
+        
+        layout.addLayout(search_filter_layout)
+        
+        # Action buttons row
+        actions_layout = QHBoxLayout()
+        actions_layout.setSpacing(12)
         
         self.add_videos_btn = QPushButton("➕ Add Videos")
         self.add_videos_btn.clicked.connect(self.add_videos_from_folder)
-        controls_h_layout.addWidget(self.add_videos_btn)
+        self.add_videos_btn.setMinimumHeight(46)
+        actions_layout.addWidget(self.add_videos_btn)
+        
+        self.delete_selected_btn = QPushButton("🗑️ Delete Selected")
+        self.delete_selected_btn.setProperty("danger", True)
+        self.delete_selected_btn.clicked.connect(self.delete_selected_videos)
+        self.delete_selected_btn.setEnabled(False)
+        self.delete_selected_btn.setMinimumHeight(46)
+        actions_layout.addWidget(self.delete_selected_btn)
         
         self.refresh_btn = QPushButton("🔄 Refresh")
         self.refresh_btn.setProperty("secondary", True)
         self.refresh_btn.clicked.connect(self.refresh_videos)
-        controls_h_layout.addWidget(self.refresh_btn)
+        self.refresh_btn.setMinimumHeight(46)
+        actions_layout.addWidget(self.refresh_btn)
         
-        self.upload_all_btn = QPushButton("⬆ Upload All Pending")
+        self.upload_all_btn = QPushButton("⬆️ Upload All Pending")
         self.upload_all_btn.clicked.connect(self.upload_all_pending)
-        controls_h_layout.addWidget(self.upload_all_btn)
+        self.upload_all_btn.setMinimumHeight(46)
+        actions_layout.addWidget(self.upload_all_btn)
         
-        controls_h_layout.addStretch()
+        actions_layout.addStretch()
         
-        layout.addLayout(controls_h_layout)
+        layout.addLayout(actions_layout)
         
-        # Bulk Upload Configuration (NEW)
-        bulk_config_group = QGroupBox("Bulk Upload Settings")
+        # Bulk Upload Configuration
+        bulk_config_group = QGroupBox("⚙️ Bulk Upload Settings")
         bulk_config_layout = QHBoxLayout(bulk_config_group)
+        bulk_config_layout.setSpacing(16)
         
         bulk_config_layout.addWidget(QLabel("Delay between uploads:"))
         
-        from PySide6.QtWidgets import QSpinBox
         self.upload_delay_spinbox = QSpinBox()
         self.upload_delay_spinbox.setMinimum(0)
         self.upload_delay_spinbox.setMaximum(3600)
@@ -116,43 +474,55 @@ class VideosTab(QWidget):
         self.upload_delay_spinbox.setToolTip(
             "Time to wait between each upload in bulk upload mode (0 for no delay)"
         )
+        self.upload_delay_spinbox.setMinimumHeight(42)
         bulk_config_layout.addWidget(self.upload_delay_spinbox)
         
         bulk_config_layout.addStretch()
         
-        delay_hint = QLabel("Use delay to prevent rate limiting and spread uploads over time")
+        delay_hint = QLabel("⏱️ Use delay to prevent rate limiting")
         delay_hint.setProperty("subheading", True)
         bulk_config_layout.addWidget(delay_hint)
         
         layout.addWidget(bulk_config_group)
         
-        # Videos table
-        videos_group = QGroupBox("Videos")
+        # Videos table with modern styling
+        videos_group = QGroupBox("📹 Your Videos")
         videos_layout = QVBoxLayout(videos_group)
         
         # Create table
         self.videos_table = QTableWidget()
-        self.videos_table.setColumnCount(8)
+        self.videos_table.setColumnCount(9)
         self.videos_table.setHorizontalHeaderLabels([
-            "Title", "Duration", "Instagram", "TikTok", "YouTube", 
+            "Title", "Duration", "Size", "Instagram", "TikTok", "YouTube", 
             "Allow Duplicates", "Actions", "File Path"
         ])
         
         # Configure table
         self.videos_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.videos_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.videos_table.setSelectionMode(QAbstractItemView.MultiSelection)
         self.videos_table.setAlternatingRowColors(True)
+        self.videos_table.verticalHeader().setVisible(False)
+        self.videos_table.setShowGrid(False)
+        self.videos_table.setMinimumHeight(400)
         
         # Set column widths
         header = self.videos_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)  # Title
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Duration
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Instagram
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # TikTok
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # YouTube
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Duplicates
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Actions
-        header.setSectionResizeMode(7, QHeaderView.Stretch)  # File Path
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Size
+        header.setSectionResizeMode(3, QHeaderView.Fixed)  # Instagram
+        self.videos_table.setColumnWidth(3, 80)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)  # TikTok
+        self.videos_table.setColumnWidth(4, 80)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)  # YouTube
+        self.videos_table.setColumnWidth(5, 80)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Duplicates
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Actions
+        header.setSectionResizeMode(8, QHeaderView.Stretch)  # File Path
+        
+        # Connect selection change
+        self.videos_table.itemSelectionChanged.connect(self.on_selection_changed)
         
         videos_layout.addWidget(self.videos_table)
         
@@ -164,6 +534,31 @@ class VideosTab(QWidget):
         
         # Initial load
         self.refresh_videos()
+    
+    def on_search_changed(self, text):
+        """Handle search text change."""
+        self.current_filter = text.lower()
+        self.refresh_videos()
+    
+    def on_sort_changed(self, index):
+        """Handle sort option change."""
+        self.refresh_videos()
+    
+    def on_selection_changed(self):
+        """Handle selection change in table."""
+        selected_rows = self.videos_table.selectionModel().selectedRows()
+        self.delete_selected_btn.setEnabled(len(selected_rows) > 0)
+    
+    def format_file_size(self, size_bytes: int) -> str:
+        """Format file size in human-readable format."""
+        if size_bytes is None:
+            return "N/A"
+        
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f} PB"
     
     def add_videos_from_folder(self):
         """Add multiple videos from any folder to the registry."""
@@ -191,10 +586,6 @@ class VideosTab(QWidget):
                     video_id = Path(video_path).stem
                     
                     # Register video
-                    # Note: Checksum calculation is skipped for performance reasons.
-                    # This means duplicate files won't be detected based on content,
-                    # only by video_id (filename). For large video libraries where
-                    # content-based deduplication is needed, set calculate_checksum=True.
                     success = self.video_registry.register_video(
                         video_id=video_id,
                         file_path=video_path,
@@ -215,15 +606,98 @@ class VideosTab(QWidget):
                     logger.error(f"Failed to add video {video_path}: {e}")
                     skipped_count += 1
             
-            # Show summary
-            message = f"Added {added_count} video(s)"
-            if skipped_count > 0:
-                message += f"\nSkipped {skipped_count} (already exist or error)"
+            # Show summary with notification
+            if added_count > 0:
+                self.show_notification(
+                    f"Added {added_count} video(s)",
+                    "success" if skipped_count == 0 else "warning"
+                )
             
-            QMessageBox.information(self, "Videos Added", message)
+            if skipped_count > 0 and added_count == 0:
+                self.show_notification(
+                    f"Skipped {skipped_count} video(s) - already exist or error",
+                    "warning"
+                )
             
             # Refresh table
             self.refresh_videos()
+    
+    def delete_selected_videos(self):
+        """Delete selected videos from registry."""
+        # Get selected rows using table's selection model
+        selected_rows = self.videos_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+        
+        # Get video IDs from selected rows
+        video_ids = []
+        for row_index in selected_rows:
+            row = row_index.row()
+            title_item = self.videos_table.item(row, 0)  # Title column
+            if title_item:
+                video_id = title_item.data(Qt.UserRole)
+                if video_id:
+                    video_ids.append(video_id)
+        
+        if not video_ids:
+            return
+        
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to delete {len(video_ids)} video(s) from the registry?\n\n"
+            "⚠️ This will remove the video records and upload history.\n"
+            "The actual video files will NOT be deleted from disk.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            deleted_count = 0
+            failed_count = 0
+            
+            for video_id in video_ids:
+                if self.video_registry.delete_video(video_id):
+                    deleted_count += 1
+                else:
+                    failed_count += 1
+            
+            # Show result with notification
+            if deleted_count > 0:
+                self.show_notification(
+                    f"Deleted {deleted_count} video(s)",
+                    "success" if failed_count == 0 else "warning"
+                )
+            
+            if failed_count > 0 and deleted_count == 0:
+                self.show_notification(
+                    f"Failed to delete {failed_count} video(s)",
+                    "error"
+                )
+            
+            # Clear selection and refresh
+            self.videos_table.clearSelection()
+            self.refresh_videos()
+    
+    def edit_video_title(self, video_id: str, current_title: str):
+        """Edit video title."""
+        dialog = EditTitleDialog(current_title, self)
+        
+        if dialog.exec() == QDialog.Accepted:
+            new_title = dialog.get_title()
+            
+            if new_title and new_title != current_title:
+                if self.video_registry.update_video_title(video_id, new_title):
+                    self.show_notification(f"Title updated: {new_title}", "success")
+                    self.refresh_videos()
+                else:
+                    self.show_notification(f"Failed to update title", "error")
+    
+    def show_video_details(self, video: dict):
+        """Show detailed video information dialog."""
+        dialog = VideoDetailsDialog(video, self.video_registry, self)
+        dialog.exec()
     
     def _get_video_duration(self, video_path: str) -> float:
         """
@@ -254,7 +728,7 @@ class VideosTab(QWidget):
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30  # Increased timeout for large files
+                timeout=30
             )
             
             if result.returncode == 0 and result.stdout.strip():
@@ -284,15 +758,15 @@ class VideosTab(QWidget):
             Unicode emoji representing the status
         """
         if status == "SUCCESS":
-            return "✔"  # Checkmark
+            return "✅"  # Green checkmark
         elif status in ["FAILED", "FAILED_FINAL"]:
-            return "✖"  # X mark
+            return "❌"  # Red X
         elif status == "IN_PROGRESS":
             return "⏳"  # Hourglass
         elif status == "BLOCKED":
-            return "❌"  # Prohibited
+            return "🚫"  # Prohibited
         elif status == "RATE_LIMITED":
-            return "🔁"  # Loop (retry)
+            return "🔄"  # Loop (retry)
         else:
             return "⚪"  # Empty (not uploaded)
     
@@ -329,23 +803,64 @@ class VideosTab(QWidget):
         return tooltip
     
     def refresh_videos(self):
-        """Refresh the videos table from the database."""
+        """Refresh the videos table from the database with filtering and sorting."""
         try:
             videos = self.video_registry.get_all_videos()
+            
+            # Apply search filter
+            if self.current_filter:
+                videos = [
+                    v for v in videos 
+                    if self.current_filter in v.get('title', '').lower()
+                ]
+            
+            # Apply sorting
+            sort_option = self.sort_combo.currentIndex()
+            if sort_option == 0:  # Title A-Z
+                videos.sort(key=lambda v: v.get('title', '').lower())
+            elif sort_option == 1:  # Title Z-A
+                videos.sort(key=lambda v: v.get('title', '').lower(), reverse=True)
+            elif sort_option == 2:  # Duration Short
+                videos.sort(key=lambda v: v.get('duration', 0))
+            elif sort_option == 3:  # Duration Long
+                videos.sort(key=lambda v: v.get('duration', 0), reverse=True)
+            elif sort_option == 4:  # Date Newest
+                videos.sort(key=lambda v: v.get('created_at', ''), reverse=True)
+            elif sort_option == 5:  # Date Oldest
+                videos.sort(key=lambda v: v.get('created_at', ''))
+            
+            # Update stats
+            self.stats_label.setText(f"{len(videos)} video{'s' if len(videos) != 1 else ''}")
             
             # Update table
             self.videos_table.setRowCount(len(videos))
             
             for row, video in enumerate(videos):
-                # Title
-                title_item = QTableWidgetItem(video.get('title', 'Untitled'))
+                video_id = video.get('id', '')
+                
+                # Title (with video_id stored as user data)
+                title = video.get('title', 'Untitled')
+                title_item = QTableWidgetItem(title)
+                title_item.setData(Qt.UserRole, video_id)  # Store video_id
                 self.videos_table.setItem(row, 0, title_item)
                 
                 # Duration
                 duration = video.get('duration', 0)
-                duration_text = f"{duration:.1f}s" if duration else "N/A"
+                if duration > 0:
+                    mins, secs = divmod(int(duration), 60)
+                    duration_text = f"{mins}:{secs:02d}"
+                else:
+                    duration_text = "N/A"
                 duration_item = QTableWidgetItem(duration_text)
-                self.videos_table.setItem(row, 1, duration_item)
+                duration_item.setTextAlignment(Qt.AlignCenter)
+                self.videos_table.setItem(row, 2, duration_item)
+                
+                # File size
+                file_size = self.video_registry.get_file_size(video_id)
+                size_text = self.format_file_size(file_size)
+                size_item = QTableWidgetItem(size_text)
+                size_item.setTextAlignment(Qt.AlignCenter)
+                self.videos_table.setItem(row, 3, size_item)
                 
                 # Platform statuses
                 uploads = video.get('uploads', {})
@@ -356,7 +871,7 @@ class VideosTab(QWidget):
                 instagram_item = QTableWidgetItem(instagram_icon)
                 instagram_item.setTextAlignment(Qt.AlignCenter)
                 instagram_item.setToolTip(self.get_status_tooltip(instagram_info))
-                self.videos_table.setItem(row, 2, instagram_item)
+                self.videos_table.setItem(row, 4, instagram_item)
                 
                 # TikTok
                 tiktok_info = uploads.get('TikTok')
@@ -364,7 +879,7 @@ class VideosTab(QWidget):
                 tiktok_item = QTableWidgetItem(tiktok_icon)
                 tiktok_item.setTextAlignment(Qt.AlignCenter)
                 tiktok_item.setToolTip(self.get_status_tooltip(tiktok_info))
-                self.videos_table.setItem(row, 3, tiktok_item)
+                self.videos_table.setItem(row, 5, tiktok_item)
                 
                 # YouTube
                 youtube_info = uploads.get('YouTube')
@@ -372,7 +887,7 @@ class VideosTab(QWidget):
                 youtube_item = QTableWidgetItem(youtube_icon)
                 youtube_item.setTextAlignment(Qt.AlignCenter)
                 youtube_item.setToolTip(self.get_status_tooltip(youtube_info))
-                self.videos_table.setItem(row, 4, youtube_item)
+                self.videos_table.setItem(row, 6, youtube_item)
                 
                 # Duplicate toggle
                 duplicate_allowed = bool(video.get('duplicate_allowed', 0))
@@ -384,58 +899,106 @@ class VideosTab(QWidget):
                 duplicate_checkbox = QCheckBox()
                 duplicate_checkbox.setChecked(duplicate_allowed)
                 duplicate_checkbox.stateChanged.connect(
-                    lambda state, vid=video['id']: self.toggle_duplicate_allowed(vid, state == Qt.Checked)
+                    lambda state, vid=video_id: self.toggle_duplicate_allowed(vid, state == Qt.Checked)
                 )
                 duplicate_layout.addWidget(duplicate_checkbox)
                 
-                self.videos_table.setCellWidget(row, 5, duplicate_widget)
+                self.videos_table.setCellWidget(row, 7, duplicate_widget)
                 
-                # Actions (Upload buttons)
+                # Actions (Upload + Edit + Delete buttons)
                 actions_widget = QWidget()
                 actions_layout = QHBoxLayout(actions_widget)
                 actions_layout.setContentsMargins(4, 4, 4, 4)
                 actions_layout.setSpacing(4)
                 
+                # View details button
+                details_btn = QPushButton("ℹ️")
+                details_btn.setMaximumWidth(36)
+                details_btn.setToolTip("View Details")
+                details_btn.clicked.connect(
+                    lambda checked, v=video: self.show_video_details(v)
+                )
+                actions_layout.addWidget(details_btn)
+                
+                # Edit title button
+                edit_btn = QPushButton("✏️")
+                edit_btn.setMaximumWidth(36)
+                edit_btn.setToolTip("Edit Title")
+                edit_btn.clicked.connect(
+                    lambda checked, vid=video_id, t=title: self.edit_video_title(vid, t)
+                )
+                actions_layout.addWidget(edit_btn)
+                
                 # Instagram upload button
                 instagram_btn = QPushButton("📷")
-                instagram_btn.setMaximumWidth(40)
+                instagram_btn.setMaximumWidth(36)
                 instagram_btn.setToolTip("Upload to Instagram")
                 instagram_btn.clicked.connect(
-                    lambda checked, vid=video['id']: self.upload_to_platform(vid, "Instagram")
+                    lambda checked, vid=video_id: self.upload_to_platform(vid, "Instagram")
                 )
                 actions_layout.addWidget(instagram_btn)
                 
                 # TikTok upload button
                 tiktok_btn = QPushButton("🎵")
-                tiktok_btn.setMaximumWidth(40)
+                tiktok_btn.setMaximumWidth(36)
                 tiktok_btn.setToolTip("Upload to TikTok")
                 tiktok_btn.clicked.connect(
-                    lambda checked, vid=video['id']: self.upload_to_platform(vid, "TikTok")
+                    lambda checked, vid=video_id: self.upload_to_platform(vid, "TikTok")
                 )
                 actions_layout.addWidget(tiktok_btn)
                 
                 # YouTube upload button
-                youtube_btn = QPushButton("▶")
-                youtube_btn.setMaximumWidth(40)
+                youtube_btn = QPushButton("▶️")
+                youtube_btn.setMaximumWidth(36)
                 youtube_btn.setToolTip("Upload to YouTube")
                 youtube_btn.clicked.connect(
-                    lambda checked, vid=video['id']: self.upload_to_platform(vid, "YouTube")
+                    lambda checked, vid=video_id: self.upload_to_platform(vid, "YouTube")
                 )
                 actions_layout.addWidget(youtube_btn)
                 
-                self.videos_table.setCellWidget(row, 6, actions_widget)
+                # Delete button
+                delete_btn = QPushButton("🗑️")
+                delete_btn.setMaximumWidth(36)
+                delete_btn.setProperty("danger", True)
+                delete_btn.setToolTip("Delete Video")
+                delete_btn.clicked.connect(
+                    lambda checked, vid=video_id: self.delete_single_video(vid)
+                )
+                actions_layout.addWidget(delete_btn)
+                
+                self.videos_table.setCellWidget(row, 8, actions_widget)
                 
                 # File Path
                 file_path = video.get('file_path', '')
                 file_path_item = QTableWidgetItem(file_path)
                 file_path_item.setToolTip(file_path)
-                self.videos_table.setItem(row, 7, file_path_item)
+                self.videos_table.setItem(row, 9, file_path_item)
             
             logger.debug(f"Refreshed videos table: {len(videos)} videos")
             
         except Exception as e:
             logger.error(f"Failed to refresh videos: {e}")
             QMessageBox.warning(self, "Refresh Error", f"Failed to refresh videos:\n{e}")
+    
+    def delete_single_video(self, video_id: str):
+        """Delete a single video."""
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to delete this video from the registry?\n\n"
+            "⚠️ This will remove the video record and upload history.\n"
+            "The actual video file will NOT be deleted from disk.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            if self.video_registry.delete_video(video_id):
+                self.show_notification("Video deleted successfully", "success")
+                self.refresh_videos()
+            else:
+                self.show_notification("Failed to delete video", "error")
+
     
     def toggle_duplicate_allowed(self, video_id: str, allowed: bool):
         """
@@ -545,7 +1108,6 @@ class VideosTab(QWidget):
     def on_upload_started(self, video_id: str, platform: str):
         """Handle upload start."""
         logger.info(f"Upload started: {video_id} to {platform}")
-        # Could show progress indicator here
     
     def on_upload_finished(self, video_id: str, platform: str, success: bool):
         """Handle upload completion."""
@@ -563,13 +1125,13 @@ class VideosTab(QWidget):
             QMessageBox.information(
                 self,
                 "Upload Successful",
-                f"Video {video_id} uploaded to {platform} successfully!"
+                f"✅ Video {video_id} uploaded to {platform} successfully!"
             )
         else:
             QMessageBox.warning(
                 self,
                 "Upload Failed",
-                f"Failed to upload {video_id} to {platform}. Check logs for details."
+                f"❌ Failed to upload {video_id} to {platform}. Check logs for details."
             )
         
         # Refresh to show updated status
@@ -696,7 +1258,7 @@ class VideosTab(QWidget):
         QMessageBox.information(
             self,
             "Bulk Upload Complete",
-            f"Uploaded {successful} videos successfully\n{failed} failed"
+            f"✅ Uploaded {successful} videos successfully\n❌ {failed} failed"
         )
         
         self.refresh_videos()

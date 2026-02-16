@@ -498,3 +498,100 @@ class VideoRegistry:
             return []
         finally:
             conn.close()
+    
+    def delete_video(self, video_id: str) -> bool:
+        """
+        Delete a video from the registry.
+        
+        Args:
+            video_id: Video identifier
+            
+        Returns:
+            True if deletion succeeded, False otherwise
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Delete upload records first (foreign key constraint)
+            cursor.execute('DELETE FROM video_uploads WHERE video_id = ?', (video_id,))
+            
+            # Delete video record
+            cursor.execute('DELETE FROM videos WHERE id = ?', (video_id,))
+            
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            
+            if deleted:
+                logger.info(f"Video deleted from registry: {video_id}")
+            else:
+                logger.warning(f"Video not found: {video_id}")
+            
+            return deleted
+            
+        except Exception as e:
+            logger.error(f"Failed to delete video {video_id}: {e}")
+            return False
+        finally:
+            conn.close()
+    
+    def update_video_title(self, video_id: str, new_title: str) -> bool:
+        """
+        Update video title.
+        
+        Args:
+            video_id: Video identifier
+            new_title: New title for the video
+            
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                UPDATE videos
+                SET title = ?
+                WHERE id = ?
+            ''', (new_title, video_id))
+            
+            conn.commit()
+            updated = cursor.rowcount > 0
+            
+            if updated:
+                logger.info(f"Video title updated: {video_id} -> {new_title}")
+            else:
+                logger.warning(f"Video not found: {video_id}")
+            
+            return updated
+            
+        except Exception as e:
+            logger.error(f"Failed to update video title: {e}")
+            return False
+        finally:
+            conn.close()
+    
+    def get_file_size(self, video_id: str) -> Optional[int]:
+        """
+        Get file size of a video.
+        
+        Args:
+            video_id: Video identifier
+            
+        Returns:
+            File size in bytes or None if file not found
+        """
+        video = self.get_video(video_id)
+        if not video:
+            return None
+        
+        file_path = video.get('file_path')
+        if not file_path or not os.path.exists(file_path):
+            return None
+        
+        try:
+            return os.path.getsize(file_path)
+        except Exception as e:
+            logger.error(f"Failed to get file size for {video_id}: {e}")
+            return None

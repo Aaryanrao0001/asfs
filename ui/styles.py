@@ -552,4 +552,96 @@ QMenu::separator {
     background-color: #2a2a2a;
     margin: 4px 10px;
 }
+
+/* ============================================
+   TABLE WIDGET - Modern, Clean Design
+   ============================================ */
+QTableWidget {
+    background-color: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    gridline-color: #2a2a2a;
+    selection-background-color: rgba(59, 130, 246, 0.2);
+    selection-color: #ffffff;
+}
+
+QTableWidget::item {
+    padding: 12px 8px;
+    border: none;
+    color: #e5e5e5;
+}
+
+QTableWidget::item:selected {
+    background-color: rgba(59, 130, 246, 0.2);
+    color: #ffffff;
+}
+
+QTableWidget::item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+QHeaderView::section {
+    background-color: #242424;
+    color: #a0a0a0;
+    padding: 12px 8px;
+    border: none;
+    border-right: 1px solid #2a2a2a;
+    border-bottom: 2px solid #3b82f6;
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+QHeaderView::section:first {
+    border-top-left-radius: 12px;
+}
+
+QHeaderView::section:last {
+    border-top-right-radius: 12px;
+    border-right: none;
+}
+
+QTableWidget QTableCornerButton::section {
+    background-color: #242424;
+    border: none;
+}
+
+/* Alternating row colors for better readability */
+QTableWidget::item:alternate {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* ============================================
+   DIALOG - Modern Modal Windows
+   ============================================ */
+QDialog {
+    background-color: #1a1a1a;
+    border: 1px solid #333333;
+    border-radius: 12px;
+}
+
+QDialog QLabel {
+    color: #e5e5e5;
+}
+
+QDialog QPushButton {
+    min-width: 100px;
+    padding: 12px 24px;
+}
+
+/* ============================================
+   FILE DIALOG - Enhanced
+   ============================================ */
+QFileDialog {
+    background-color: #1a1a1a;
+}
+
+QFileDialog QLabel {
+    color: #e5e5e5;
+}
+
+QFileDialog QPushButton {
+    min-height: 36px;
+}
 """
