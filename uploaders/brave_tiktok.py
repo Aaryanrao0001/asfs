@@ -414,7 +414,7 @@ def _wait_for_draftjs_stable(page: Page, selector: str, timeout: int = 30000) ->
                 
                 return hasDraftJS;
             }
-        """, selector, timeout=timeout)
+        """, arg=selector, timeout=timeout)
         
         logger.info("DraftJS editor is stable and ready")
         return True
