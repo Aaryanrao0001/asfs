@@ -14,6 +14,7 @@ import os
 import random
 import logging
 from typing import Optional
+from datetime import datetime
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 from .brave_base import BraveBrowserBase
 from .selectors import get_instagram_selectors, try_selectors_with_page
@@ -628,7 +629,6 @@ def _select_post_option(page: Page, timeout: int = 45000) -> bool:
                         existing_variants = json.load(f)
                 
                 # Add timestamp to new data
-                from datetime import datetime
                 new_entry = {
                     "timestamp": datetime.now().isoformat(),
                     "menu_items": menu_data
@@ -965,6 +965,18 @@ def upload_to_instagram(
     # (Instagram doesn't have separate title field)
     final_title = title or caption[:100]
     final_description = description or caption
+    
+    # Fallback: If all content is empty, generate from video filename
+    if not final_title and not final_description and not caption:
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        final_title = (video_name if video_name else f"Video {timestamp}")[:100]
+        final_description = f"Uploaded on {timestamp}"
+        logger.warning(f"No title/description/caption provided, using fallback: title='{final_title[:50]}...'")
+    elif not final_title and not final_description:
+        # At least we have caption, use it
+        final_title = caption[:100]
+        final_description = caption
     
     # Check if BraveBrowserManager is initialized (pipeline mode)
     manager = BraveBrowserManager.get_instance()

@@ -8,6 +8,7 @@ import os
 import random
 import logging
 from typing import Optional
+from datetime import datetime
 from .brave_base import BraveBrowserBase
 from .selectors import get_youtube_selectors, try_selectors_with_page
 
@@ -287,6 +288,17 @@ def upload_to_youtube(
     # Use title and description if provided, otherwise fall back to caption
     final_title = title if title else (caption[:100] if caption else "")
     final_description = description if description else caption
+    
+    # Fallback: If both title and description are empty, generate from video filename
+    if not final_title and not final_description:
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        final_title = (video_name if video_name else f"Video {timestamp}")[:100]
+        final_description = f"Uploaded on {timestamp}"
+        logger.warning(f"No title/description/caption provided, using fallback: title='{final_title[:50]}...'")
+    elif not final_title:
+        # At least we have description, use part of it as title
+        final_title = final_description[:100]
     
     # Check if BraveBrowserManager is initialized (pipeline mode)
     manager = BraveBrowserManager.get_instance()

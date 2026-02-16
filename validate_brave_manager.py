@@ -31,10 +31,10 @@ def test_singleton_pattern():
     instance2 = BraveBrowserManager.get_instance()
     
     if instance1 is instance2:
-        logger.info("✓ PASS: Both instances are identical (singleton works)")
+        logger.info("[PASS] Both instances are identical (singleton works)")
         return True
     else:
-        logger.error("✗ FAIL: Instances are different (singleton broken)")
+        logger.error("[FAIL] Instances are different (singleton broken)")
         return False
 
 
@@ -51,7 +51,7 @@ def test_initialization():
         profile_directory = os.getenv("BRAVE_PROFILE_DIRECTORY", "Default")
         
         if not user_data_dir:
-            logger.warning("⚠ SKIP: BRAVE_USER_DATA_DIR not set, skipping initialization test")
+            logger.warning("[SKIP] BRAVE_USER_DATA_DIR not set, skipping initialization test")
             logger.info("  Set BRAVE_USER_DATA_DIR to test full initialization")
             return True
         
@@ -62,36 +62,36 @@ def test_initialization():
         )
         
         if manager.is_initialized:
-            logger.info("✓ PASS: Manager initialized successfully")
+            logger.info("[PASS] Manager initialized successfully")
             
             # Test page creation
             logger.info("  Creating test page...")
             page = manager.get_page()
-            logger.info("  ✓ Page created successfully")
+            logger.info("  [OK] Page created successfully")
             
             # Navigate to test URL
             logger.info("  Navigating to test URL...")
             page.goto("https://www.google.com", wait_until="domcontentloaded", timeout=10000)
-            logger.info("  ✓ Navigation successful")
+            logger.info("  [OK] Navigation successful")
             
             # Close page
             manager.close_page(page)
-            logger.info("  ✓ Page closed successfully")
+            logger.info("  [OK] Page closed successfully")
             
             # Cleanup
             manager.close()
-            logger.info("  ✓ Manager closed successfully")
+            logger.info("  [OK] Manager closed successfully")
             
             # Reset for other tests
             BraveBrowserManager.reset_instance()
             
             return True
         else:
-            logger.error("✗ FAIL: Manager not initialized")
+            logger.error("[FAIL] Manager not initialized")
             return False
             
     except Exception as e:
-        logger.error(f"✗ FAIL: Initialization error: {e}")
+        logger.error(f"[FAIL] Initialization error: {e}")
         # Reset on failure
         try:
             manager = BraveBrowserManager.get_instance()
@@ -115,7 +115,7 @@ def test_backward_compatibility():
         user_data_dir = os.getenv("BRAVE_USER_DATA_DIR")
         
         if not user_data_dir:
-            logger.warning("⚠ SKIP: BRAVE_USER_DATA_DIR not set, skipping backward compatibility test")
+            logger.warning("[SKIP] BRAVE_USER_DATA_DIR not set, skipping backward compatibility test")
             return True
         
         # Just test instantiation, don't launch to avoid conflicts
@@ -125,12 +125,12 @@ def test_backward_compatibility():
             profile_directory="Default"
         )
         
-        logger.info("✓ PASS: BraveBrowserBase can still be instantiated")
+        logger.info("[PASS] BraveBrowserBase can still be instantiated")
         logger.info("  (Standalone scripts will continue to work)")
         return True
         
     except Exception as e:
-        logger.error(f"✗ FAIL: Backward compatibility broken: {e}")
+        logger.error(f"[FAIL] Backward compatibility broken: {e}")
         return False
 
 
@@ -145,15 +145,15 @@ def test_uploader_wrapper_detection():
         manager = BraveBrowserManager.get_instance()
         
         if manager.is_initialized:
-            logger.error("✗ FAIL: Manager should not be initialized at this point")
+            logger.error("[FAIL] Manager should not be initialized at this point")
             return False
         
-        logger.info("✓ PASS: Manager correctly reports as not initialized")
+        logger.info("[PASS] Manager correctly reports as not initialized")
         logger.info("  (Uploaders will use standalone mode when manager not initialized)")
         return True
         
     except Exception as e:
-        logger.error(f"✗ FAIL: Wrapper detection error: {e}")
+        logger.error(f"[FAIL] Wrapper detection error: {e}")
         return False
 
 
@@ -179,7 +179,7 @@ def main():
     total = len(results)
     
     for test_name, result in results:
-        status = "✓ PASS" if result else "✗ FAIL"
+        status = "[PASS]" if result else "[FAIL]"
         logger.info(f"{status}: {test_name}")
     
     logger.info("=" * 80)
@@ -187,10 +187,10 @@ def main():
     logger.info("=" * 80)
     
     if passed == total:
-        logger.info("✓ All tests passed!")
+        logger.info("[OK] All tests passed!")
         return 0
     else:
-        logger.error("✗ Some tests failed")
+        logger.error("[FAIL] Some tests failed")
         return 1
 
 

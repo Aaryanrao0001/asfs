@@ -8,6 +8,7 @@ import os
 import random
 import logging
 from typing import Optional
+from datetime import datetime
 from playwright.sync_api import Page
 from .brave_base import BraveBrowserBase
 from .selectors import get_tiktok_selectors, try_selectors_with_page
@@ -73,7 +74,7 @@ def _wait_for_processing_complete(page: Page, timeout: int = 180000) -> bool:
                 # wait_for_selector will raise TimeoutError if selector not found within timeout
                 page.wait_for_selector(selector, timeout=30000, state="visible")
                 elapsed = time.time() - start_time
-                logger.info(f"✓ Upload status: Uploaded (detected in {elapsed:.1f}s)")
+                logger.info(f"[OK] Upload status: Uploaded (detected in {elapsed:.1f}s)")
                 uploaded_found = True
                 break
             except Exception as e:
@@ -954,6 +955,18 @@ def upload_to_tiktok(
     # Use title and description independently if provided
     final_title = title or caption[:100]
     final_description = description or caption
+    
+    # Fallback: If all content is empty, generate from video filename
+    if not final_title and not final_description and not caption:
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        final_title = (video_name if video_name else f"Video {timestamp}")[:100]
+        final_description = f"Uploaded on {timestamp}"
+        logger.warning(f"No title/description/caption provided, using fallback: title='{final_title[:50]}...'")
+    elif not final_title and not final_description:
+        # At least we have caption, use it
+        final_title = caption[:100]
+        final_description = caption
     
     # Check if BraveBrowserManager is initialized (pipeline mode)
     manager = BraveBrowserManager.get_instance()
