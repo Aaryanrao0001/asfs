@@ -307,7 +307,6 @@ class VideosTab(QWidget):
         self.current_filter = ""  # Current search filter
         self.current_sort_column = 0  # Current sort column
         self.current_sort_order = Qt.AscendingOrder  # Current sort order
-        self.selected_rows = set()  # Track selected rows for batch operations
         self.notifications = []  # Track active notifications
         self.init_ui()
         
@@ -492,9 +491,9 @@ class VideosTab(QWidget):
         
         # Create table
         self.videos_table = QTableWidget()
-        self.videos_table.setColumnCount(10)
+        self.videos_table.setColumnCount(9)
         self.videos_table.setHorizontalHeaderLabels([
-            "☑️", "Title", "Duration", "Size", "Instagram", "TikTok", "YouTube", 
+            "Title", "Duration", "Size", "Instagram", "TikTok", "YouTube", 
             "Allow Duplicates", "Actions", "File Path"
         ])
         
@@ -509,20 +508,18 @@ class VideosTab(QWidget):
         
         # Set column widths
         header = self.videos_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Checkbox
-        self.videos_table.setColumnWidth(0, 50)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Title
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Duration
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Size
-        header.setSectionResizeMode(4, QHeaderView.Fixed)  # Instagram
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Title
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Duration
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Size
+        header.setSectionResizeMode(3, QHeaderView.Fixed)  # Instagram
+        self.videos_table.setColumnWidth(3, 80)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)  # TikTok
         self.videos_table.setColumnWidth(4, 80)
-        header.setSectionResizeMode(5, QHeaderView.Fixed)  # TikTok
+        header.setSectionResizeMode(5, QHeaderView.Fixed)  # YouTube
         self.videos_table.setColumnWidth(5, 80)
-        header.setSectionResizeMode(6, QHeaderView.Fixed)  # YouTube
-        self.videos_table.setColumnWidth(6, 80)
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Duplicates
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)  # Actions
-        header.setSectionResizeMode(9, QHeaderView.Stretch)  # File Path
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Duplicates
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Actions
+        header.setSectionResizeMode(8, QHeaderView.Stretch)  # File Path
         
         # Connect selection change
         self.videos_table.itemSelectionChanged.connect(self.on_selection_changed)
@@ -550,8 +547,7 @@ class VideosTab(QWidget):
     def on_selection_changed(self):
         """Handle selection change in table."""
         selected_rows = self.videos_table.selectionModel().selectedRows()
-        self.selected_rows = {row.row() for row in selected_rows}
-        self.delete_selected_btn.setEnabled(len(self.selected_rows) > 0)
+        self.delete_selected_btn.setEnabled(len(selected_rows) > 0)
     
     def format_file_size(self, size_bytes: int) -> str:
         """Format file size in human-readable format."""
@@ -628,13 +624,16 @@ class VideosTab(QWidget):
     
     def delete_selected_videos(self):
         """Delete selected videos from registry."""
-        if not self.selected_rows:
+        # Get selected rows using table's selection model
+        selected_rows = self.videos_table.selectionModel().selectedRows()
+        if not selected_rows:
             return
         
-        # Get video IDs
+        # Get video IDs from selected rows
         video_ids = []
-        for row in sorted(self.selected_rows):
-            title_item = self.videos_table.item(row, 1)
+        for row_index in selected_rows:
+            row = row_index.row()
+            title_item = self.videos_table.item(row, 0)  # Title column
             if title_item:
                 video_id = title_item.data(Qt.UserRole)
                 if video_id:
@@ -678,7 +677,7 @@ class VideosTab(QWidget):
                 )
             
             # Clear selection and refresh
-            self.selected_rows.clear()
+            self.videos_table.clearSelection()
             self.refresh_videos()
     
     def edit_video_title(self, video_id: str, current_title: str):
@@ -839,23 +838,11 @@ class VideosTab(QWidget):
             for row, video in enumerate(videos):
                 video_id = video.get('id', '')
                 
-                # Checkbox column
-                checkbox_widget = QWidget()
-                checkbox_layout = QHBoxLayout(checkbox_widget)
-                checkbox_layout.setContentsMargins(0, 0, 0, 0)
-                checkbox_layout.setAlignment(Qt.AlignCenter)
-                
-                checkbox = QCheckBox()
-                checkbox.setChecked(row in self.selected_rows)
-                checkbox_layout.addWidget(checkbox)
-                
-                self.videos_table.setCellWidget(row, 0, checkbox_widget)
-                
-                # Title with edit button
+                # Title (with video_id stored as user data)
                 title = video.get('title', 'Untitled')
                 title_item = QTableWidgetItem(title)
                 title_item.setData(Qt.UserRole, video_id)  # Store video_id
-                self.videos_table.setItem(row, 1, title_item)
+                self.videos_table.setItem(row, 0, title_item)
                 
                 # Duration
                 duration = video.get('duration', 0)
