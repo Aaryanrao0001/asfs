@@ -10,15 +10,24 @@ from PySide6.QtCore import Qt
 from .main_window import MainWindow
 from .styles import DARK_THEME
 
-# Configure logging
+# Configure logging with UTF-8 encoding support
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('asfs_ui.log'),
+        logging.FileHandler('asfs_ui.log', encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
+
+# Configure StreamHandler to use UTF-8 encoding to support Unicode characters on Windows
+for handler in logging.root.handlers:
+    if isinstance(handler, logging.StreamHandler) and hasattr(handler.stream, 'reconfigure'):
+        try:
+            handler.stream.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            # If reconfigure fails, continue with default encoding
+            pass
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +64,12 @@ def run_app():
         logger.info("Checking dependencies...")
         dependencies = check_all_dependencies()
         
-        # Log dependency status
+        # Log dependency status (using ASCII chars for Windows compatibility)
         for name, (available, message) in dependencies.items():
             if available:
-                logger.info(f"✓ {name}: {message}")
+                logger.info(f"[OK] {name}: {message}")
             else:
-                logger.warning(f"✗ {name}: {message}")
+                logger.warning(f"[MISSING] {name}: {message}")
         
         app = create_app()
         

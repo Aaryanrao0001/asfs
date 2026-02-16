@@ -192,9 +192,9 @@ def validate_dependencies_with_warnings() -> bool:
     
     for name, (available, message) in results.items():
         if available:
-            logger.info(f"✓ {name}: {message}")
+            logger.info(f"[OK] {name}: {message}")
         else:
-            logger.warning(f"✗ {name}: {message}")
+            logger.warning(f"[MISSING] {name}: {message}")
             logger.warning(get_installation_instructions(name))
             all_available = False
     
@@ -212,17 +212,17 @@ def get_dependency_status_message() -> str:
     lines = ["Dependency Status:", ""]
     
     for name, (available, message) in results.items():
-        status = "✓ Available" if available else "✗ Missing"
+        status = "[OK] Available" if available else "[MISSING]"
         lines.append(f"  {name}: {status}")
         if available:
-            lines.append(f"    → {message}")
+            lines.append(f"    -> {message}")
         else:
-            lines.append(f"    → {message}")
+            lines.append(f"    -> {message}")
             # Add brief installation hint
             if name == "ffmpeg" or name == "ffprobe":
-                lines.append(f"    → Install: https://ffmpeg.org/download.html")
+                lines.append(f"    -> Install: https://ffmpeg.org/download.html")
             elif name == "playwright":
-                lines.append(f"    → Run: playwright install chromium")
+                lines.append(f"    -> Run: playwright install chromium")
         lines.append("")
     
     return "\n".join(lines)
@@ -238,13 +238,13 @@ def check_dependency_interactive() -> bool:
     missing = get_missing_dependencies()
     
     if not missing:
-        print("✓ All dependencies are available")
+        print("[OK] All dependencies are available")
         return True
     
-    print("\n⚠ Missing Dependencies Detected:\n")
+    print("\n[WARNING] Missing Dependencies Detected:\n")
     
     for dep in missing:
-        print(f"  ✗ {dep}")
+        print(f"  [MISSING] {dep}")
         print(get_installation_instructions(dep))
         print()
     
