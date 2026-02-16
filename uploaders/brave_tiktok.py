@@ -7,8 +7,13 @@ Navigates to TikTok upload page and automates the upload process.
 import os
 import random
 import logging
+import time
+import re
+import shutil
+import tempfile
 from typing import Optional
 from datetime import datetime
+from pathlib import Path
 from playwright.sync_api import Page
 from .brave_base import BraveBrowserBase
 from .selectors import get_tiktok_selectors, try_selectors_with_page
@@ -17,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 # Initialize TikTok selector manager (with intelligence)
 _tiktok_selectors = get_tiktok_selectors()
+
+# Constants for stability and validation
+EDITOR_STABILITY_THRESHOLD_SECONDS = 1.0  # Time without mutations for stable editor
+UPLOAD_CONTAINER_STABILITY_SECONDS = 1.0  # Time without changes for stable upload container
+MAX_FILENAME_LENGTH = 100  # Maximum filename length for sanitized titles
 
 # TikTok network error messages
 TIKTOK_NETWORK_ERROR_MESSAGES = [
@@ -502,7 +512,6 @@ def _wait_for_draftjs_stable(page: Page, selector: str, timeout: int = 30000) ->
     Returns:
         True if editor is stable, False otherwise
     """
-    import time
     try:
         logger.info("Waiting for DraftJS editor to stabilize (checking for final mount)...")
         
@@ -535,40 +544,35 @@ def _wait_for_draftjs_stable(page: Page, selector: str, timeout: int = 30000) ->
         # We need to detect the final editor, not the preview one
         logger.info("Checking for editor stability (no mutations for 1s)...")
         start_time = time.time()
-        mutation_free_time = 0
-        last_check = start_time
+        last_mutation_time = start_time
+        stability_check_interval = 0.2  # 200ms between checks
         
-        while mutation_free_time < 1.0 and (time.time() - start_time) < (timeout / 1000):
+        while (time.time() - last_mutation_time) < EDITOR_STABILITY_THRESHOLD_SECONDS and (time.time() - start_time) < (timeout / 1000):
             # Check if editor still exists and hasn't been replaced
             try:
                 current_editor = page.query_selector(selector)
                 if not current_editor:
                     logger.warning("Editor disappeared during stability check - waiting for remount...")
                     page.wait_for_selector(selector, state="visible", timeout=5000)
-                    mutation_free_time = 0
-                    last_check = time.time()
+                    last_mutation_time = time.time()
                     continue
                 
                 # Wait a bit before next check
-                page.wait_for_timeout(200)
+                page.wait_for_timeout(int(stability_check_interval * 1000))
                 
                 # Check if editor is still the same
                 new_editor = page.query_selector(selector)
-                if new_editor and current_editor:
-                    # Editor exists and is stable
-                    mutation_free_time = time.time() - last_check
-                else:
+                if not (new_editor and current_editor):
                     # Editor changed
-                    mutation_free_time = 0
-                    last_check = time.time()
+                    last_mutation_time = time.time()
                     
             except Exception as e:
                 logger.debug(f"Stability check iteration error: {e}")
-                mutation_free_time = 0
-                last_check = time.time()
+                last_mutation_time = time.time()
         
-        if mutation_free_time >= 1.0:
-            logger.info("DraftJS editor is stable (no mutations for 1s) - ready for caption")
+        mutation_free_time = time.time() - last_mutation_time
+        if mutation_free_time >= EDITOR_STABILITY_THRESHOLD_SECONDS:
+            logger.info(f"DraftJS editor is stable ({mutation_free_time:.1f}s without mutations) - ready for caption")
             return True
         else:
             logger.warning(f"DraftJS editor stability timeout - proceeding anyway (waited {time.time() - start_time:.1f}s)")
@@ -728,7 +732,6 @@ def _wait_for_upload_container_stable(page: Page, timeout: int = 30000) -> bool:
     Returns:
         True if container is stable, False otherwise
     """
-    import time
     try:
         logger.info("Waiting for upload container to stabilize...")
         
@@ -758,21 +761,22 @@ def _wait_for_upload_container_stable(page: Page, timeout: int = 30000) -> bool:
         # Wait for stability - no DOM changes for 1 second
         logger.info("Waiting for upload container stability (1s without changes)...")
         start_time = time.time()
-        stable_for = 0
+        last_change_time = start_time
+        stability_check_interval = 0.2  # 200ms between checks
         
-        while stable_for < 1.0 and (time.time() - start_time) < (timeout / 1000):
+        while (time.time() - last_change_time) < UPLOAD_CONTAINER_STABILITY_SECONDS and (time.time() - start_time) < (timeout / 1000):
             # Check if file input exists
             file_input_count_before = page.locator('input[type="file"]').count()
-            page.wait_for_timeout(200)
+            page.wait_for_timeout(int(stability_check_interval * 1000))
             file_input_count_after = page.locator('input[type="file"]').count()
             
-            if file_input_count_before == file_input_count_after and file_input_count_after > 0:
-                stable_for += 0.2
-            else:
-                stable_for = 0
+            if file_input_count_before != file_input_count_after or file_input_count_after == 0:
+                # Change detected, reset timer
+                last_change_time = time.time()
         
-        if stable_for >= 1.0:
-            logger.info("Upload container is stable")
+        stable_time = time.time() - last_change_time
+        if stable_time >= UPLOAD_CONTAINER_STABILITY_SECONDS:
+            logger.info(f"Upload container is stable ({stable_time:.1f}s without changes)")
             return True
         else:
             logger.warning(f"Upload container stability timeout - proceeding anyway")
@@ -793,16 +797,16 @@ def _sanitize_filename(title: str) -> str:
     Returns:
         Sanitized filename
     """
-    import re
     # Remove or replace invalid filename characters
     sanitized = re.sub(r'[<>:"/\\|?*]', '', title)
     # Replace multiple spaces with single space
     sanitized = re.sub(r'\s+', ' ', sanitized)
     # Trim whitespace
     sanitized = sanitized.strip()
-    # Limit length to 100 characters
-    if len(sanitized) > 100:
-        sanitized = sanitized[:100]
+    # Limit length to MAX_FILENAME_LENGTH characters (UTF-8 safe truncation)
+    if len(sanitized) > MAX_FILENAME_LENGTH:
+        # Truncate and ensure we don't break in the middle of a multi-byte character
+        sanitized = sanitized[:MAX_FILENAME_LENGTH].encode('utf-8', 'ignore').decode('utf-8', 'ignore').strip()
     return sanitized if sanitized else "video"
 
 
@@ -813,6 +817,10 @@ def _prepare_video_file_with_title(video_path: str, title: str) -> str:
     This ensures TikTok uses the correct title from filename as fallback
     when UI title field is not available or unreliable.
     
+    NOTE: The temporary file is NOT automatically cleaned up to allow for upload completion.
+    The OS will clean it up on reboot, or it can be manually cleaned from the temp directory.
+    For production use, consider implementing cleanup after successful upload.
+    
     Args:
         video_path: Path to original video file
         title: Title to use for the video
@@ -820,18 +828,15 @@ def _prepare_video_file_with_title(video_path: str, title: str) -> str:
     Returns:
         Path to prepared video file (copy with new name)
     """
-    import shutil
-    import tempfile
-    from pathlib import Path
-    
     try:
         # Get file extension
         original_file = Path(video_path)
         extension = original_file.suffix
         
-        # Create sanitized filename from title
+        # Create sanitized filename from title with timestamp to avoid collisions
         sanitized_title = _sanitize_filename(title)
-        new_filename = f"{sanitized_title}{extension}"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        new_filename = f"{sanitized_title}_{timestamp}{extension}"
         
         # Create copy in temp directory with new name
         temp_dir = tempfile.gettempdir()
@@ -1010,17 +1015,22 @@ def upload_to_tiktok_browser(
         
         # Fill in caption (description + tags)
         # ALWAYS include hashtags in description as specified
-        if tags and tags.strip():
-            full_caption = f"{description}\n\n{tags}".strip() if description else tags.strip()
+        # Cache stripped values to avoid redundant operations
+        title_stripped = title.strip() if title else ""
+        description_stripped = description.strip() if description else ""
+        tags_stripped = tags.strip() if tags else ""
+        
+        if tags_stripped:
+            full_caption = f"{description_stripped}\n\n{tags_stripped}".strip() if description_stripped else tags_stripped
         else:
-            full_caption = description.strip() if description else ""
+            full_caption = description_stripped
         
         # Add title at the beginning if it's different from description
-        if title and title.strip() and title.strip() != description.strip():
+        if title_stripped and title_stripped != description_stripped:
             if full_caption:
-                full_caption = f"{title}\n\n{full_caption}"
+                full_caption = f"{title_stripped}\n\n{full_caption}"
             else:
-                full_caption = title.strip()
+                full_caption = title_stripped
         
         logger.info(f"Composed caption (length: {len(full_caption)})")
         logger.debug(f"Caption preview: {full_caption[:100]}...")
@@ -1434,17 +1444,22 @@ def _upload_to_tiktok_with_manager(
         
         # Fill in caption (description + tags)
         # ALWAYS include hashtags in description as specified
-        if tags and tags.strip():
-            full_caption = f"{description}\n\n{tags}".strip() if description else tags.strip()
+        # Cache stripped values to avoid redundant operations
+        title_stripped = title.strip() if title else ""
+        description_stripped = description.strip() if description else ""
+        tags_stripped = tags.strip() if tags else ""
+        
+        if tags_stripped:
+            full_caption = f"{description_stripped}\n\n{tags_stripped}".strip() if description_stripped else tags_stripped
         else:
-            full_caption = description.strip() if description else ""
+            full_caption = description_stripped
         
         # Add title at the beginning if it's different from description
-        if title and title.strip() and title.strip() != description.strip():
+        if title_stripped and title_stripped != description_stripped:
             if full_caption:
-                full_caption = f"{title}\n\n{full_caption}"
+                full_caption = f"{title_stripped}\n\n{full_caption}"
             else:
-                full_caption = title.strip()
+                full_caption = title_stripped
         
         logger.info(f"Composed caption (length: {len(full_caption)})")
         logger.debug(f"Caption preview: {full_caption[:100]}...")
