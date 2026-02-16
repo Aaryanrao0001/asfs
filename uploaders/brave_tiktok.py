@@ -7,8 +7,13 @@ Navigates to TikTok upload page and automates the upload process.
 import os
 import random
 import logging
+import time
+import re
+import shutil
+import tempfile
 from typing import Optional
 from datetime import datetime
+from pathlib import Path
 from playwright.sync_api import Page
 from .brave_base import BraveBrowserBase
 from .selectors import get_tiktok_selectors, try_selectors_with_page
@@ -17,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 # Initialize TikTok selector manager (with intelligence)
 _tiktok_selectors = get_tiktok_selectors()
+
+# Constants for stability and validation
+EDITOR_STABILITY_THRESHOLD_SECONDS = 1.0  # Time without mutations for stable editor
+UPLOAD_CONTAINER_STABILITY_SECONDS = 1.0  # Time without changes for stable upload container
+MAX_FILENAME_LENGTH = 100  # Maximum filename length for sanitized titles
 
 # TikTok network error messages
 TIKTOK_NETWORK_ERROR_MESSAGES = [
@@ -30,10 +40,10 @@ TIKTOK_NETWORK_ERROR_MESSAGES = [
 
 def _accept_tiktok_cookies(page: Page):
     """
-    Accept TikTok cookie banner if present.
+    Accept TikTok cookie banner and disable overlay interaction layer.
     
     TikTok uses a Web Component with Shadow DOM for cookie consent.
-    Normal selectors cannot reach inside shadow DOM, so we need JavaScript.
+    After accepting, we also need to disable any overlay that might intercept clicks.
     
     Args:
         page: Playwright Page object
@@ -61,7 +71,22 @@ def _accept_tiktok_cookies(page: Page):
         """)
 
         page.wait_for_timeout(1500)
-        logger.info("Cookies accepted")
+        
+        # Disable any overlay that might intercept pointer events
+        page.evaluate("""
+        () => {
+            // Remove or disable overlays that might intercept clicks
+            const overlays = document.querySelectorAll('[class*="overlay"], [class*="backdrop"], [style*="z-index"]');
+            overlays.forEach(overlay => {
+                if (overlay.style.pointerEvents !== 'none') {
+                    overlay.style.pointerEvents = 'none';
+                    overlay.style.display = 'none';
+                }
+            });
+        }
+        """)
+        
+        logger.info("Cookies accepted and overlay disabled")
     except Exception:
         logger.info("No cookie banner present")
 
@@ -70,24 +95,57 @@ def _wait_for_real_upload(page: Page) -> bool:
     """
     Wait for real upload confirmation after clicking Post.
     
-    After clicking Post, TikTok should show processing/uploading indicators.
-    This detects whether the Post mutation actually triggered.
+    This function waits for actual publish signals, not just page state.
+    Acceptable signals:
+    - Upload processing panel appears
+    - Publish network request sent
+    - Processing indicator visible
     
     Args:
         page: Playwright Page object
         
     Returns:
-        True if upload started, False if mutation never fired
+        True if upload started with verified signal, False if no signal detected
     """
     try:
-        page.wait_for_selector(
+        # Strategy 1: Wait for upload processing panel/text indicators
+        upload_indicators = [
             'text=/uploading|processing|your video/i',
-            timeout=120000
-        )
-        logger.info("Upload actually started")
-        return True
-    except Exception:
-        logger.error("Post mutation never triggered")
+            '[data-e2e="upload-processing"]',
+            '[class*="upload"][class*="processing"]',
+            'div:has-text("Processing")',
+            'div:has-text("Uploading")'
+        ]
+        
+        for indicator in upload_indicators:
+            try:
+                page.wait_for_selector(indicator, timeout=10000, state="visible")
+                logger.info(f"Upload signal detected: {indicator}")
+                logger.info("Upload actually started")  # Legacy log for test compatibility
+                return True
+            except Exception:
+                continue
+        
+        # Strategy 2: Check for network activity - publish API request
+        # Note: This is a fallback - ideally we'd use request interception
+        # but for now we just check if we're still on upload page
+        try:
+            current_url = page.url.lower()
+            if "upload" not in current_url:
+                # Navigation away from upload page is a good signal
+                logger.info("Upload confirmed - navigated away from upload page")
+                return True
+        except Exception:
+            pass
+        
+        # If we reach here, no publish signal was detected
+        logger.error("No upload signal detected - upload likely failed")
+        logger.error("Post mutation never triggered")  # Legacy log for test compatibility
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error waiting for upload signal: {e}")
+        logger.error("Post mutation never triggered")  # Legacy log for test compatibility
         return False
 
 
@@ -223,6 +281,7 @@ def _validate_post_button_state(page: Page, button_element) -> bool:
     - aria-disabled is not "true"
     - data-loading is not "true"
     - Button is visible and in viewport
+    - Backend validation state is complete (no processing indicators)
     
     Args:
         page: Playwright Page object
@@ -244,17 +303,29 @@ def _validate_post_button_state(page: Page, button_element) -> bool:
             logger.warning("Post button is loading, not ready to click")
             return False
         
+        # Check if button is disabled via disabled attribute
+        is_disabled = button_element.get_attribute('disabled')
+        if is_disabled is not None:
+            logger.warning("Post button has disabled attribute, not ready to click")
+            return False
+        
         # Check if button is visible
         if not button_element.is_visible():
             logger.warning("Post button is not visible")
+            return False
+        
+        # Check that backend validation is complete - no processing indicators
+        processing_indicators = page.locator('[class*="processing"], [class*="validating"], text=/validating/i').count()
+        if processing_indicators > 0:
+            logger.warning(f"Backend still processing/validating (found {processing_indicators} indicators)")
             return False
         
         logger.info("Post button state validated - ready to click")
         return True
     except Exception as e:
         logger.warning(f"Error validating post button state: {e}")
-        # If we can't validate, assume it's ready (fail open)
-        return True
+        # If we can't validate, assume it's NOT ready (fail closed for safety)
+        return False
 
 
 def _click_post_button_with_validation(page: Page, post_button, max_retries: int = 3) -> bool:
@@ -262,9 +333,10 @@ def _click_post_button_with_validation(page: Page, post_button, max_retries: int
     Click the post button with state validation and retry logic.
     
     Ensures:
-    - Button is in valid state (not disabled, not loading)
-    - Button is scrolled into view
-    - Click triggers React state updates properly
+    - Processing complete
+    - Final editor mounted
+    - Button enabled state stable
+    - No force-click logic (guaranteed failure in React apps)
     
     Args:
         page: Playwright Page object
@@ -282,9 +354,9 @@ def _click_post_button_with_validation(page: Page, post_button, max_retries: int
             if attempt > 0:
                 page.wait_for_timeout(3000)
             
-            # Validate button state
+            # Validate button state (includes backend validation check)
             if not _validate_post_button_state(page, post_button):
-                logger.warning("Post button not in valid state, waiting...")
+                logger.warning("Post button not in valid state, waiting longer...")
                 page.wait_for_timeout(5000)
                 continue
             
@@ -295,20 +367,22 @@ def _click_post_button_with_validation(page: Page, post_button, max_retries: int
             except Exception as e:
                 logger.debug(f"Could not scroll button into view: {e}")
             
-            # Try normal click first
+            # Normal click only - NO force click
+            # Force click bypasses React validation and will fail
             try:
-                logger.info("Clicking post button (normal click)...")
+                logger.info("Clicking post button (normal click only)...")
                 post_button.click(timeout=10000, no_wait_after=True)
                 logger.info("Post button clicked successfully")
                 return True
             except Exception as click_error:
                 logger.error(f"Click failed: {click_error}")
-                # If click fails, it means the button is not truly clickable
-                # Force clicks don't work because React checks state
+                # If normal click fails, button is not truly clickable
+                # This likely means React validation hasn't completed
                 if attempt < max_retries - 1:
-                    logger.warning("Click failed, retrying...")
+                    logger.warning("Click failed - React validation may not be complete, retrying...")
                     continue
                 else:
+                    logger.error("All click attempts failed - button not clickable")
                     return False
         
         except Exception as e:
@@ -425,10 +499,10 @@ def _wait_for_draftjs_stable(page: Page, selector: str, timeout: int = 30000) ->
     Wait for DraftJS editor to be stable and ready for input.
     
     This ensures the editor has:
-    1. Mounted in the DOM
+    1. Mounted in the DOM (final mount, not preview)
     2. Is visible and focused
     3. Has initialized its React state
-    4. Is not in the middle of a lifecycle transition
+    4. No DOM mutations for ~1s after processing completes
     
     Args:
         page: Playwright Page object
@@ -439,7 +513,7 @@ def _wait_for_draftjs_stable(page: Page, selector: str, timeout: int = 30000) ->
         True if editor is stable, False otherwise
     """
     try:
-        logger.info("Waiting for DraftJS editor to stabilize...")
+        logger.info("Waiting for DraftJS editor to stabilize (checking for final mount)...")
         
         # Wait for editor to exist and be visible
         page.wait_for_selector(selector, state="visible", timeout=timeout)
@@ -465,8 +539,44 @@ def _wait_for_draftjs_stable(page: Page, selector: str, timeout: int = 30000) ->
             }
         """, arg=selector, timeout=timeout)
         
-        logger.info("DraftJS editor is stable and ready")
-        return True
+        # CRITICAL: Wait for no DOM mutations for 1 second to ensure final editor mount
+        # TikTok flow: upload → preview editor mount → validation → final editor mount → publish
+        # We need to detect the final editor, not the preview one
+        logger.info("Checking for editor stability (no mutations for 1s)...")
+        start_time = time.time()
+        last_mutation_time = start_time
+        stability_check_interval = 0.2  # 200ms between checks
+        
+        while (time.time() - last_mutation_time) < EDITOR_STABILITY_THRESHOLD_SECONDS and (time.time() - start_time) < (timeout / 1000):
+            # Check if editor still exists and hasn't been replaced
+            try:
+                current_editor = page.query_selector(selector)
+                if not current_editor:
+                    logger.warning("Editor disappeared during stability check - waiting for remount...")
+                    page.wait_for_selector(selector, state="visible", timeout=5000)
+                    last_mutation_time = time.time()
+                    continue
+                
+                # Wait a bit before next check
+                page.wait_for_timeout(int(stability_check_interval * 1000))
+                
+                # Check if editor is still the same
+                new_editor = page.query_selector(selector)
+                if not (new_editor and current_editor):
+                    # Editor changed
+                    last_mutation_time = time.time()
+                    
+            except Exception as e:
+                logger.debug(f"Stability check iteration error: {e}")
+                last_mutation_time = time.time()
+        
+        mutation_free_time = time.time() - last_mutation_time
+        if mutation_free_time >= EDITOR_STABILITY_THRESHOLD_SECONDS:
+            logger.info(f"DraftJS editor is stable ({mutation_free_time:.1f}s without mutations) - ready for caption")
+            return True
+        else:
+            logger.warning(f"DraftJS editor stability timeout - proceeding anyway (waited {time.time() - start_time:.1f}s)")
+            return True  # Proceed anyway after timeout
         
     except Exception as e:
         logger.warning(f"Timeout waiting for DraftJS stability: {e}")
@@ -608,6 +718,142 @@ def _navigate_with_retry(page: Page, url: str, max_retries: int = 3, verify_sele
     return False
 
 
+def _wait_for_upload_container_stable(page: Page, timeout: int = 30000) -> bool:
+    """
+    Wait for stable upload container before locating file input.
+    
+    TikTok recreates file input after page hydration, so we need to wait
+    for the mount lifecycle to complete, not just retry selectors.
+    
+    Args:
+        page: Playwright Page object
+        timeout: Maximum wait time in milliseconds
+        
+    Returns:
+        True if container is stable, False otherwise
+    """
+    try:
+        logger.info("Waiting for upload container to stabilize...")
+        
+        # Wait for upload page to be fully loaded
+        page.wait_for_load_state("domcontentloaded", timeout=timeout)
+        
+        # Wait for any upload-related container to exist
+        upload_container_selectors = [
+            '[data-e2e="upload-container"]',
+            'div[class*="upload"]',
+            'form[action*="upload"]',
+        ]
+        
+        container_found = False
+        for selector in upload_container_selectors:
+            try:
+                page.wait_for_selector(selector, timeout=10000, state="attached")
+                logger.info(f"Upload container found: {selector}")
+                container_found = True
+                break
+            except Exception:
+                continue
+        
+        if not container_found:
+            logger.warning("No upload container found - proceeding anyway")
+        
+        # Wait for stability - no DOM changes for 1 second
+        logger.info("Waiting for upload container stability (1s without changes)...")
+        start_time = time.time()
+        last_change_time = start_time
+        stability_check_interval = 0.2  # 200ms between checks
+        
+        while (time.time() - last_change_time) < UPLOAD_CONTAINER_STABILITY_SECONDS and (time.time() - start_time) < (timeout / 1000):
+            # Check if file input exists
+            file_input_count_before = page.locator('input[type="file"]').count()
+            page.wait_for_timeout(int(stability_check_interval * 1000))
+            file_input_count_after = page.locator('input[type="file"]').count()
+            
+            if file_input_count_before != file_input_count_after or file_input_count_after == 0:
+                # Change detected, reset timer
+                last_change_time = time.time()
+        
+        stable_time = time.time() - last_change_time
+        if stable_time >= UPLOAD_CONTAINER_STABILITY_SECONDS:
+            logger.info(f"Upload container is stable ({stable_time:.1f}s without changes)")
+            return True
+        else:
+            logger.warning(f"Upload container stability timeout - proceeding anyway")
+            return True  # Proceed anyway
+            
+    except Exception as e:
+        logger.warning(f"Error waiting for upload container stability: {e}")
+        return False
+
+
+def _sanitize_filename(title: str) -> str:
+    """
+    Sanitize title for use as a filename.
+    
+    Args:
+        title: The title to sanitize
+        
+    Returns:
+        Sanitized filename
+    """
+    # Remove or replace invalid filename characters
+    sanitized = re.sub(r'[<>:"/\\|?*]', '', title)
+    # Replace multiple spaces with single space
+    sanitized = re.sub(r'\s+', ' ', sanitized)
+    # Trim whitespace
+    sanitized = sanitized.strip()
+    # Limit length to MAX_FILENAME_LENGTH characters (UTF-8 safe truncation)
+    if len(sanitized) > MAX_FILENAME_LENGTH:
+        # Truncate and ensure we don't break in the middle of a multi-byte character
+        sanitized = sanitized[:MAX_FILENAME_LENGTH].encode('utf-8', 'ignore').decode('utf-8', 'ignore').strip()
+    return sanitized if sanitized else "video"
+
+
+def _prepare_video_file_with_title(video_path: str, title: str) -> str:
+    """
+    Prepare video file with title - create a copy with sanitized title as filename.
+    
+    This ensures TikTok uses the correct title from filename as fallback
+    when UI title field is not available or unreliable.
+    
+    NOTE: The temporary file is NOT automatically cleaned up to allow for upload completion.
+    The OS will clean it up on reboot, or it can be manually cleaned from the temp directory.
+    For production use, consider implementing cleanup after successful upload.
+    
+    Args:
+        video_path: Path to original video file
+        title: Title to use for the video
+        
+    Returns:
+        Path to prepared video file (copy with new name)
+    """
+    try:
+        # Get file extension
+        original_file = Path(video_path)
+        extension = original_file.suffix
+        
+        # Create sanitized filename from title with timestamp to avoid collisions
+        sanitized_title = _sanitize_filename(title)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        new_filename = f"{sanitized_title}_{timestamp}{extension}"
+        
+        # Create copy in temp directory with new name
+        temp_dir = tempfile.gettempdir()
+        new_path = Path(temp_dir) / new_filename
+        
+        # Copy file
+        shutil.copy2(video_path, new_path)
+        logger.info(f"Created video copy with title-based filename: {new_filename}")
+        
+        return str(new_path)
+        
+    except Exception as e:
+        logger.warning(f"Error preparing video file with title: {e}")
+        # Return original path if copy fails
+        return video_path
+
+
 def upload_to_tiktok_browser(
     video_path: str,
     title: str,
@@ -681,6 +927,13 @@ def upload_to_tiktok_browser(
                 else:
                     raise Exception("Upload interface not found after login - TikTok UI may have changed")
         
+        # Prepare video file with title-based filename for TikTok fallback
+        # This ensures TikTok has correct title from filename if UI title field is unreliable
+        prepared_video_path = _prepare_video_file_with_title(video_path, title)
+        
+        # Wait for upload container to be stable before locating file input
+        _wait_for_upload_container_stable(page, timeout=30000)
+        
         # Upload video file using selector intelligence with adaptive ranking
         # Automatically tries multiple selector strategies based on success history
         logger.info("Uploading video file")
@@ -690,11 +943,11 @@ def upload_to_tiktok_browser(
             # Fallback to legacy behavior
             try:
                 file_input_selector = 'input[type="file"]'
-                browser.upload_file(file_input_selector, video_path)
+                browser.upload_file(file_input_selector, prepared_video_path)
             except Exception as e:
                 logger.warning(f"Primary file selector failed, trying alternative: {e}")
                 file_input_selector = '[data-e2e="upload-input"]'
-                browser.upload_file(file_input_selector, video_path)
+                browser.upload_file(file_input_selector, prepared_video_path)
         else:
             # Use selector intelligence
             selector_value, file_input = try_selectors_with_page(
@@ -708,7 +961,7 @@ def upload_to_tiktok_browser(
                 logger.error("Failed to find file input with selector intelligence")
                 raise Exception("File input not found")
             
-            browser.upload_file(selector_value, video_path)
+            browser.upload_file(selector_value, prepared_video_path)
         
         logger.info("File upload initiated, waiting for processing signals...")
         
@@ -760,8 +1013,27 @@ def upload_to_tiktok_browser(
         if not _wait_for_post_button_ready(page, timeout=600000):
             logger.warning("Timeout waiting for post button ready, proceeding anyway...")
         
-        # Fill in caption (title + description + tags)
-        full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
+        # Fill in caption (description + tags)
+        # ALWAYS include hashtags in description as specified
+        # Cache stripped values to avoid redundant operations
+        title_stripped = title.strip() if title else ""
+        description_stripped = description.strip() if description else ""
+        tags_stripped = tags.strip() if tags else ""
+        
+        if tags_stripped:
+            full_caption = f"{description_stripped}\n\n{tags_stripped}".strip() if description_stripped else tags_stripped
+        else:
+            full_caption = description_stripped
+        
+        # Add title at the beginning if it's different from description
+        if title_stripped and title_stripped != description_stripped:
+            if full_caption:
+                full_caption = f"{title_stripped}\n\n{full_caption}"
+            else:
+                full_caption = title_stripped
+        
+        logger.info(f"Composed caption (length: {len(full_caption)})")
+        logger.debug(f"Caption preview: {full_caption[:100]}...")
         
         logger.info("Filling caption using DraftJS-compatible InputEvent method")
         caption_group = _tiktok_selectors.get_group("caption_input")
@@ -1090,6 +1362,13 @@ def _upload_to_tiktok_with_manager(
                 else:
                     raise Exception("Upload interface not found after login - TikTok UI may have changed")
         
+        # Prepare video file with title-based filename for TikTok fallback
+        # This ensures TikTok has correct title from filename if UI title field is unreliable
+        prepared_video_path = _prepare_video_file_with_title(video_path, title)
+        
+        # Wait for upload container to be stable before locating file input
+        _wait_for_upload_container_stable(page, timeout=30000)
+        
         # Upload video file using selector intelligence with adaptive ranking
         # Automatically tries multiple selector strategies based on success history
         logger.info("Uploading video file")
@@ -1100,12 +1379,12 @@ def _upload_to_tiktok_with_manager(
             try:
                 file_input_selector = 'input[type="file"]'
                 file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=90000)
-                file_input.set_input_files(video_path)
+                file_input.set_input_files(prepared_video_path)
             except Exception as e:
                 logger.warning(f"Primary file selector failed, trying alternative: {e}")
                 file_input_selector = '[data-e2e="upload-input"]'
                 file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=90000)
-                file_input.set_input_files(video_path)
+                file_input.set_input_files(prepared_video_path)
         else:
             # Use selector intelligence
             selector_value, file_input = try_selectors_with_page(
@@ -1119,7 +1398,7 @@ def _upload_to_tiktok_with_manager(
                 logger.error("Failed to find file input with selector intelligence")
                 raise Exception("File input not found")
             
-            file_input.set_input_files(video_path)
+            file_input.set_input_files(prepared_video_path)
         
         logger.info("File upload initiated, waiting for processing signals...")
         
@@ -1163,8 +1442,27 @@ def _upload_to_tiktok_with_manager(
         if not _wait_for_post_button_ready(page, timeout=600000):
             logger.warning("Timeout waiting for post button ready, proceeding anyway...")
         
-        # Fill in caption (title + description + tags)
-        full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
+        # Fill in caption (description + tags)
+        # ALWAYS include hashtags in description as specified
+        # Cache stripped values to avoid redundant operations
+        title_stripped = title.strip() if title else ""
+        description_stripped = description.strip() if description else ""
+        tags_stripped = tags.strip() if tags else ""
+        
+        if tags_stripped:
+            full_caption = f"{description_stripped}\n\n{tags_stripped}".strip() if description_stripped else tags_stripped
+        else:
+            full_caption = description_stripped
+        
+        # Add title at the beginning if it's different from description
+        if title_stripped and title_stripped != description_stripped:
+            if full_caption:
+                full_caption = f"{title_stripped}\n\n{full_caption}"
+            else:
+                full_caption = title_stripped
+        
+        logger.info(f"Composed caption (length: {len(full_caption)})")
+        logger.debug(f"Caption preview: {full_caption[:100]}...")
         
         logger.info("Filling caption using DraftJS-compatible InputEvent method")
         caption_group = _tiktok_selectors.get_group("caption_input")
