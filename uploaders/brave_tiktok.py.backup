@@ -1005,22 +1005,8 @@ def upload_to_tiktok_browser(
         if not _wait_for_post_button_ready(page, timeout=600000):
             logger.warning("Timeout waiting for post button ready, proceeding anyway...")
         
-        # Fill in caption (description + tags)
-        # ALWAYS include hashtags in description as specified
-        if tags and tags.strip():
-            full_caption = f"{description}\n\n{tags}".strip() if description else tags.strip()
-        else:
-            full_caption = description.strip() if description else ""
-        
-        # Add title at the beginning if it's different from description
-        if title and title.strip() and title.strip() != description.strip():
-            if full_caption:
-                full_caption = f"{title}\n\n{full_caption}"
-            else:
-                full_caption = title.strip()
-        
-        logger.info(f"Composed caption (length: {len(full_caption)})")
-        logger.debug(f"Caption preview: {full_caption[:100]}...")
+        # Fill in caption (title + description + tags)
+        full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
         
         logger.info("Filling caption using DraftJS-compatible InputEvent method")
         caption_group = _tiktok_selectors.get_group("caption_input")
@@ -1349,13 +1335,6 @@ def _upload_to_tiktok_with_manager(
                 else:
                     raise Exception("Upload interface not found after login - TikTok UI may have changed")
         
-        # Prepare video file with title-based filename for TikTok fallback
-        # This ensures TikTok has correct title from filename if UI title field is unreliable
-        prepared_video_path = _prepare_video_file_with_title(video_path, title)
-        
-        # Wait for upload container to be stable before locating file input
-        _wait_for_upload_container_stable(page, timeout=30000)
-        
         # Upload video file using selector intelligence with adaptive ranking
         # Automatically tries multiple selector strategies based on success history
         logger.info("Uploading video file")
@@ -1366,12 +1345,12 @@ def _upload_to_tiktok_with_manager(
             try:
                 file_input_selector = 'input[type="file"]'
                 file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=90000)
-                file_input.set_input_files(prepared_video_path)
+                file_input.set_input_files(video_path)
             except Exception as e:
                 logger.warning(f"Primary file selector failed, trying alternative: {e}")
                 file_input_selector = '[data-e2e="upload-input"]'
                 file_input = page.wait_for_selector(file_input_selector, state="attached", timeout=90000)
-                file_input.set_input_files(prepared_video_path)
+                file_input.set_input_files(video_path)
         else:
             # Use selector intelligence
             selector_value, file_input = try_selectors_with_page(
@@ -1385,7 +1364,7 @@ def _upload_to_tiktok_with_manager(
                 logger.error("Failed to find file input with selector intelligence")
                 raise Exception("File input not found")
             
-            file_input.set_input_files(prepared_video_path)
+            file_input.set_input_files(video_path)
         
         logger.info("File upload initiated, waiting for processing signals...")
         
@@ -1429,22 +1408,8 @@ def _upload_to_tiktok_with_manager(
         if not _wait_for_post_button_ready(page, timeout=600000):
             logger.warning("Timeout waiting for post button ready, proceeding anyway...")
         
-        # Fill in caption (description + tags)
-        # ALWAYS include hashtags in description as specified
-        if tags and tags.strip():
-            full_caption = f"{description}\n\n{tags}".strip() if description else tags.strip()
-        else:
-            full_caption = description.strip() if description else ""
-        
-        # Add title at the beginning if it's different from description
-        if title and title.strip() and title.strip() != description.strip():
-            if full_caption:
-                full_caption = f"{title}\n\n{full_caption}"
-            else:
-                full_caption = title.strip()
-        
-        logger.info(f"Composed caption (length: {len(full_caption)})")
-        logger.debug(f"Caption preview: {full_caption[:100]}...")
+        # Fill in caption (title + description + tags)
+        full_caption = f"{title}\n\n{description}\n\n{tags}".strip()
         
         logger.info("Filling caption using DraftJS-compatible InputEvent method")
         caption_group = _tiktok_selectors.get_group("caption_input")
