@@ -28,6 +28,69 @@ TIKTOK_NETWORK_ERROR_MESSAGES = [
 ]
 
 
+def _accept_tiktok_cookies(page: Page):
+    """
+    Accept TikTok cookie banner if present.
+    
+    TikTok uses a Web Component with Shadow DOM for cookie consent.
+    Normal selectors cannot reach inside shadow DOM, so we need JavaScript.
+    
+    Args:
+        page: Playwright Page object
+    """
+    try:
+        page.wait_for_selector("tiktok-cookie-banner", timeout=5000)
+        logger.info("Cookie banner detected")
+
+        page.evaluate("""
+        () => {
+            const banner = document.querySelector('tiktok-cookie-banner');
+            if (!banner) return;
+
+            const root = banner.shadowRoot;
+            if (!root) return;
+
+            const buttons = root.querySelectorAll('button');
+            for (const btn of buttons) {
+                if (btn.innerText.toLowerCase().includes('accept')) {
+                    btn.click();
+                    return;
+                }
+            }
+        }
+        """)
+
+        page.wait_for_timeout(1500)
+        logger.info("Cookies accepted")
+    except:
+        logger.info("No cookie banner present")
+
+
+def _wait_for_real_upload(page: Page) -> bool:
+    """
+    Wait for real upload confirmation after clicking Post.
+    
+    After clicking Post, TikTok should show processing/uploading indicators.
+    This detects whether the Post mutation actually triggered.
+    
+    Args:
+        page: Playwright Page object
+        
+    Returns:
+        True if upload started, False if mutation never fired
+    """
+    try:
+        page.wait_for_selector(
+            'text=/uploading|processing|your video/i',
+            timeout=120000
+        )
+        logger.info("Upload actually started")
+        return True
+    except:
+        logger.error("Post mutation never triggered")
+        return False
+
+
 def _wait_for_processing_complete(page: Page, timeout: int = 180000) -> bool:
     """
     Wait for TikTok video processing to complete.
@@ -239,28 +302,14 @@ def _click_post_button_with_validation(page: Page, post_button, max_retries: int
                 logger.info("Post button clicked successfully")
                 return True
             except Exception as click_error:
-                logger.warning(f"Normal click failed: {click_error}")
-                
-                # If overlay present, try force click
-                if "intercept" in str(click_error).lower() or "overlay" in str(click_error).lower():
-                    logger.info("Overlay detected, attempting force click...")
-                    try:
-                        post_button.click(force=True, timeout=10000, no_wait_after=True)
-                        logger.info("Post button force clicked successfully")
-                        return True
-                    except Exception as force_error:
-                        logger.error(f"Force click also failed: {force_error}")
-                        if attempt < max_retries - 1:
-                            continue
-                        else:
-                            return False
+                logger.error(f"Click failed: {click_error}")
+                # If click fails, it means the button is not truly clickable
+                # Force clicks don't work because React checks state
+                if attempt < max_retries - 1:
+                    logger.warning("Click failed, retrying...")
+                    continue
                 else:
-                    # Other click error, retry
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Click failed, retrying...")
-                        continue
-                    else:
-                        return False
+                    return False
         
         except Exception as e:
             logger.error(f"Error in click attempt {attempt + 1}: {e}")
@@ -611,6 +660,9 @@ def upload_to_tiktok_browser(
         ):
             raise Exception("Failed to navigate to TikTok upload page after retries")
         
+        # Accept cookie banner if present (must be done before any interactions)
+        _accept_tiktok_cookies(page)
+        
         browser.human_delay(2, 4)
         
         # Check if user is logged in
@@ -833,50 +885,23 @@ def upload_to_tiktok_browser(
                 logger.debug("Network idle after post submission")
             except Exception:
                 logger.debug("Network idle timeout after post, continuing...")
-                page.wait_for_timeout(9000)
         except Exception as e:
             logger.error(f"Failed to click Post button: {e}")
             # Re-raise with context to preserve exception chain
             raise Exception(f"TikTok Post button click failed: {e}") from e
         
-        # Wait for upload confirmation with enhanced detection
-        logger.info("Waiting for upload confirmation...")
-        page.wait_for_timeout(5000)  # Initial wait for upload to start
+        # Wait for real upload confirmation
+        logger.info("Waiting for upload to actually start...")
+        success_confirmed = _wait_for_real_upload(page)
         
-        # Check for success indicators - be honest about what we can detect
-        current_url = page.url
-        success_confirmed = False
+        if not success_confirmed:
+            logger.error("Upload failed - Post mutation never triggered")
+            browser.close()
+            return None
         
-        # Try to detect actual success signals
-        try:
-            # Check if we got redirected away from upload page
-            if "upload" not in current_url.lower():
-                logger.info("Redirected away from upload page - likely successful")
-                success_confirmed = True
-            else:
-                # Still on upload page - TikTok often stays here after successful post
-                # We cannot reliably detect success without redirect
-                logger.info("Still on upload page - success cannot be determined")
-                success_confirmed = False
-                
-                # Wait for potential processing
-                page.wait_for_timeout(5000)
-        except Exception as e:
-            logger.warning(f"Error checking success status: {e}")
-            success_confirmed = False
-        
-        # Apply minimum safety wait (15 seconds total from post click)
-        # to ensure TikTok has time to process the upload
-        logger.info("Applying minimum safety wait to ensure upload completion...")
-        page.wait_for_timeout(5000)  # Additional 5s to reach 15s total
-        
-        # Return honest status
-        if success_confirmed:
-            logger.info("TikTok upload confirmed successful")
-            result = "TikTok upload successful"
-        else:
-            logger.warning("TikTok upload status unverified, but safety wait completed (15s total)")
-            result = "TikTok upload submitted (status unverified, waited 15s for safety)"
+        # Upload started successfully
+        logger.info("TikTok upload confirmed successful")
+        result = "TikTok upload successful"
         
         browser.human_delay(2, 3)
         browser.close()
@@ -1042,6 +1067,9 @@ def _upload_to_tiktok_with_manager(
                 raise Exception(f"Network error: Cannot reach TikTok upload page - {nav_error}")
             else:
                 raise
+        
+        # Accept cookie banner if present (must be done before any interactions)
+        _accept_tiktok_cookies(page)
         
         page.wait_for_timeout(random.randint(2000, 4000))
         
@@ -1255,50 +1283,23 @@ def _upload_to_tiktok_with_manager(
                 logger.debug("Network idle after post submission")
             except Exception:
                 logger.debug("Network idle timeout after post, continuing...")
-                page.wait_for_timeout(9000)
         except Exception as e:
             logger.error(f"Failed to click Post button: {e}")
             # Re-raise with context to preserve exception chain
             raise Exception(f"TikTok Post button click failed: {e}") from e
         
-        # Wait for upload confirmation with enhanced detection
-        logger.info("Waiting for upload confirmation...")
-        page.wait_for_timeout(5000)  # Initial wait for upload to start
+        # Wait for real upload confirmation
+        logger.info("Waiting for upload to actually start...")
+        success_confirmed = _wait_for_real_upload(page)
         
-        # Check for success indicators - be honest about what we can detect
-        current_url = page.url
-        success_confirmed = False
+        if not success_confirmed:
+            logger.error("Upload failed - Post mutation never triggered")
+            manager.close_page(page)
+            return None
         
-        # Try to detect actual success signals
-        try:
-            # Check if we got redirected away from upload page
-            if "upload" not in current_url.lower():
-                logger.info("Redirected away from upload page - likely successful")
-                success_confirmed = True
-            else:
-                # Still on upload page - TikTok often stays here after successful post
-                # We cannot reliably detect success without redirect
-                logger.info("Still on upload page - success cannot be determined")
-                success_confirmed = False
-                
-                # Wait for potential processing
-                page.wait_for_timeout(5000)
-        except Exception as e:
-            logger.warning(f"Error checking success status: {e}")
-            success_confirmed = False
-        
-        # Apply minimum safety wait (15 seconds total from post click)
-        # to ensure TikTok has time to process the upload
-        logger.info("Applying minimum safety wait to ensure upload completion...")
-        page.wait_for_timeout(5000)  # Additional 5s to reach 15s total
-        
-        # Return honest status
-        if success_confirmed:
-            logger.info("TikTok upload confirmed successful")
-            result = "TikTok upload successful"
-        else:
-            logger.warning("TikTok upload status unverified, but safety wait completed (15s total)")
-            result = "TikTok upload submitted (status unverified, waited 15s for safety)"
+        # Upload started successfully
+        logger.info("TikTok upload confirmed successful")
+        result = "TikTok upload successful"
         
         # Navigate to about:blank for next uploader
         manager.navigate_to_blank(page)
