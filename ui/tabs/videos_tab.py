@@ -549,10 +549,14 @@ class VideosTab(QWidget):
     
     def on_upload_finished(self, video_id: str, platform: str, success: bool):
         """Handle upload completion."""
-        # Clean up worker
+        # Clean up worker thread properly
         sender = self.sender()
         if sender in self.upload_workers:
             self.upload_workers.remove(sender)
+            # Ensure thread is properly cleaned up
+            if sender.isRunning():
+                sender.quit()
+                sender.wait()  # Wait for thread to finish
         
         # Show result
         if success:
@@ -680,10 +684,14 @@ class VideosTab(QWidget):
     
     def on_bulk_upload_complete(self, successful: int, failed: int):
         """Handle bulk upload completion."""
-        # Clean up worker
+        # Clean up worker thread properly
         sender = self.sender()
         if sender in self.upload_workers:
             self.upload_workers.remove(sender)
+            # Ensure thread is properly cleaned up
+            if sender.isRunning():
+                sender.quit()
+                sender.wait()  # Wait for thread to finish
         
         QMessageBox.information(
             self,
@@ -692,3 +700,16 @@ class VideosTab(QWidget):
         )
         
         self.refresh_videos()
+    
+    def closeEvent(self, event):
+        """Clean up worker threads when tab is closed."""
+        logger.info("Cleaning up upload workers...")
+        for worker in self.upload_workers[:]:  # Copy list to avoid modification during iteration
+            if worker.isRunning():
+                logger.info(f"Waiting for worker thread to finish...")
+                worker.quit()
+                worker.wait(5000)  # Wait up to 5 seconds
+                if worker.isRunning():
+                    logger.warning("Worker thread did not finish in time")
+        self.upload_workers.clear()
+        event.accept()
