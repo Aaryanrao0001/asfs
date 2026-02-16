@@ -642,7 +642,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         
         if not brave_user_data_dir:
             logger.critical(
-                "⚠️ CRITICAL: BRAVE_USER_DATA_DIR not set!\n"
+                "[WARNING] CRITICAL: BRAVE_USER_DATA_DIR not set!\n"
                 "Users will be logged out every session.\n"
                 "Set BRAVE_USER_DATA_DIR in .env file."
             )
