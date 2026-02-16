@@ -264,7 +264,7 @@ def _click_post_button_with_validation(page: Page, post_button, max_retries: int
     Ensures:
     - Button is in valid state (not disabled, not loading)
     - Button is scrolled into view
-    - Handles potential overlays with force click fallback
+    - Click triggers React state updates properly
     
     Args:
         page: Playwright Page object
