@@ -25,9 +25,10 @@ for handler in logging.root.handlers:
     if isinstance(handler, logging.StreamHandler) and hasattr(handler.stream, 'reconfigure'):
         try:
             handler.stream.reconfigure(encoding='utf-8', errors='replace')
-        except Exception:
-            # If reconfigure fails, continue with default encoding
-            pass
+        except Exception as e:
+            # If reconfigure fails, log the issue and continue with default encoding
+            # This is expected on some older Python versions or non-standard streams
+            logging.getLogger(__name__).debug(f"Could not reconfigure stream encoding: {e}")
 
 logger = logging.getLogger(__name__)
 
