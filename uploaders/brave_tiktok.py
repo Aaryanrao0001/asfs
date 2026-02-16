@@ -1349,29 +1349,64 @@ def upload_to_tiktok(
     
     logger.info(f"Upload parameters: title='{final_title[:50]}...', tags={len(hashtags)} hashtags")
     
+    # Configure retry behavior - 3 attempts with exponential backoff
+    retry_config = RetryConfig(max_attempts=3, delays=[5, 15, 45])
+    
     # Check if BraveBrowserManager is initialized (pipeline mode)
     manager = BraveBrowserManager.get_instance()
     if manager.is_initialized:
         # Use shared browser context (pipeline mode)
         logger.info("Using shared browser context from BraveBrowserManager")
-        return _upload_to_tiktok_with_manager(
-            video_path=video_path,
-            title=final_title,
-            description=final_description,
-            tags=tags
-        )
+        
+        # Wrap upload with retry logic
+        def upload_func():
+            result = _upload_to_tiktok_with_manager(
+                video_path=video_path,
+                title=final_title,
+                description=final_description,
+                tags=tags
+            )
+            if result is None:
+                raise Exception("Upload failed - returned None")
+            return result
+        
+        try:
+            return retry_with_backoff(
+                upload_func,
+                retry_config=retry_config,
+                error_message="TikTok upload with manager"
+            )
+        except Exception as e:
+            logger.error(f"Upload failed after all retries: {e}")
+            return None
     else:
         # Standalone mode - use direct browser launch
         logger.info("Using standalone browser mode")
-        return upload_to_tiktok_browser(
-            video_path=video_path,
-            title=final_title,
-            description=final_description,
-            tags=tags,
-            brave_path=brave_path,
-            user_data_dir=user_data_dir,
-            profile_directory=profile_directory
-        )
+        
+        # Wrap upload with retry logic
+        def upload_func():
+            result = upload_to_tiktok_browser(
+                video_path=video_path,
+                title=final_title,
+                description=final_description,
+                tags=tags,
+                brave_path=brave_path,
+                user_data_dir=user_data_dir,
+                profile_directory=profile_directory
+            )
+            if result is None:
+                raise Exception("Upload failed - returned None")
+            return result
+        
+        try:
+            return retry_with_backoff(
+                upload_func,
+                retry_config=retry_config,
+                error_message="TikTok upload browser"
+            )
+        except Exception as e:
+            logger.error(f"Upload failed after all retries: {e}")
+            return None
 
 
 def _upload_to_tiktok_with_manager(
