@@ -736,11 +736,20 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                     hashtags = clip['hashtags'].get(platform, [])
                     video_file = clip['file_path']
                     
+                    # Generate title from caption (first 100 chars) for TikTok
+                    # This ensures title is set explicitly before calling uploader
+                    title = caption[:100] if caption else f"Clip {clip_id}"
+                    
                     upload_id = None
                     
                     if platform == "TikTok":
                         upload_id = upload_to_tiktok(
-                            video_file, caption, hashtags, upload_credentials["TikTok"]
+                            video_path=video_file,
+                            title=title,
+                            description=caption,
+                            caption=caption,
+                            hashtags=hashtags,
+                            credentials=upload_credentials["TikTok"]
                         )
                     elif platform == "Instagram":
                         upload_id = upload_to_instagram(
