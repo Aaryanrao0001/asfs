@@ -73,7 +73,7 @@ def _wait_for_processing_complete(page: Page, timeout: int = 180000) -> bool:
                 # wait_for_selector will raise TimeoutError if selector not found within timeout
                 page.wait_for_selector(selector, timeout=30000, state="visible")
                 elapsed = time.time() - start_time
-                logger.info(f"✓ Upload status: Uploaded (detected in {elapsed:.1f}s)")
+                logger.info(f"[OK] Upload status: Uploaded (detected in {elapsed:.1f}s)")
                 uploaded_found = True
                 break
             except Exception as e:
