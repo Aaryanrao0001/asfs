@@ -62,7 +62,7 @@ def _accept_tiktok_cookies(page: Page):
 
         page.wait_for_timeout(1500)
         logger.info("Cookies accepted")
-    except:
+    except Exception:
         logger.info("No cookie banner present")
 
 
@@ -86,7 +86,7 @@ def _wait_for_real_upload(page: Page) -> bool:
         )
         logger.info("Upload actually started")
         return True
-    except:
+    except Exception:
         logger.error("Post mutation never triggered")
         return False
 
@@ -884,13 +884,15 @@ def upload_to_tiktok_browser(
                 page.wait_for_load_state("networkidle", timeout=15000)
                 logger.debug("Network idle after post submission")
             except Exception:
+                # Network idle timeout is OK - we wait for real upload signals below
                 logger.debug("Network idle timeout after post, continuing...")
         except Exception as e:
             logger.error(f"Failed to click Post button: {e}")
             # Re-raise with context to preserve exception chain
             raise Exception(f"TikTok Post button click failed: {e}") from e
         
-        # Wait for real upload confirmation
+        # Wait for real upload confirmation (replaces arbitrary timeout)
+        # This waits up to 2 minutes for actual upload/processing indicators
         logger.info("Waiting for upload to actually start...")
         success_confirmed = _wait_for_real_upload(page)
         
@@ -1282,13 +1284,15 @@ def _upload_to_tiktok_with_manager(
                 page.wait_for_load_state("networkidle", timeout=15000)
                 logger.debug("Network idle after post submission")
             except Exception:
+                # Network idle timeout is OK - we wait for real upload signals below
                 logger.debug("Network idle timeout after post, continuing...")
         except Exception as e:
             logger.error(f"Failed to click Post button: {e}")
             # Re-raise with context to preserve exception chain
             raise Exception(f"TikTok Post button click failed: {e}") from e
         
-        # Wait for real upload confirmation
+        # Wait for real upload confirmation (replaces arbitrary timeout)
+        # This waits up to 2 minutes for actual upload/processing indicators
         logger.info("Waiting for upload to actually start...")
         success_confirmed = _wait_for_real_upload(page)
         
