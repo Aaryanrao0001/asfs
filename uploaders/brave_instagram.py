@@ -966,6 +966,20 @@ def upload_to_instagram(
     final_title = title or caption[:100]
     final_description = description or caption
     
+    # Fallback: If all content is empty, generate from video filename
+    if not final_title and not final_description and not caption:
+        import os
+        from datetime import datetime
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        final_title = f"{video_name}"[:100] if video_name else f"Video {timestamp}"
+        final_description = f"Uploaded on {timestamp}"
+        logger.warning(f"No title/description/caption provided, using fallback: title='{final_title[:50]}...'")
+    elif not final_title and not final_description:
+        # At least we have caption, use it
+        final_title = caption[:100]
+        final_description = caption
+    
     # Check if BraveBrowserManager is initialized (pipeline mode)
     manager = BraveBrowserManager.get_instance()
     if manager.is_initialized:
