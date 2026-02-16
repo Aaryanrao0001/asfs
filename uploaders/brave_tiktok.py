@@ -96,6 +96,9 @@ def _wait_for_real_upload(page: Page) -> bool:
     """
     Wait for real upload confirmation after clicking Post.
     
+    This is an ADVISORY validator - returns True if uncertain to avoid blocking uploads.
+    The calling code should not rely solely on this function for upload success verification.
+    
     This function waits for actual publish signals, not just page state.
     Acceptable signals:
     - Upload processing panel appears
@@ -106,12 +109,12 @@ def _wait_for_real_upload(page: Page) -> bool:
         page: Playwright Page object
         
     Returns:
-        True if upload started with verified signal, False if no signal detected
+        True if upload started with verified signal OR if validation is inconclusive (advisory)
+        False only if there's clear evidence of failure
     """
-    try:
-        # Strategy 1: Wait for upload processing panel using proper Playwright locators
-        # Use get_by_text with regex for text matching
-        
+    from .upload_state import safe_execute
+    
+    def check_upload_signals():
         # Try text-based indicators using proper Playwright API
         text_patterns = [
             (r'uploading', 'uploading text'),
@@ -159,16 +162,24 @@ def _wait_for_real_upload(page: Page) -> bool:
             pass
         
         # If we reach here, no publish signal was detected
-        logger.warning("No upload signal detected - upload may have failed or succeeded without clear signal")
+        # Return None to indicate "inconclusive" rather than success or failure
+        logger.warning("No clear upload signal detected - validation inconclusive")
         logger.warning("Post mutation detection incomplete")  # Legacy log for test compatibility
-        # Return True to avoid blocking - validator is advisory
+        return None
+    
+    # Use safe_execute to make this truly advisory
+    result = safe_execute(
+        check_upload_signals,
+        error_message="Upload signal validation failed",
+        return_on_error=True  # Return True (pass) on error - advisory validator
+    )
+    
+    # If validation is inconclusive (None), treat as pass to avoid blocking
+    if result is None:
+        logger.info("Upload validation inconclusive - continuing anyway (advisory validator)")
         return True
-        
-    except Exception as e:
-        logger.warning(f"Error waiting for upload signal (non-fatal): {e}")
-        logger.warning("Continuing anyway - validator is advisory only")
-        # Return True to avoid blocking on validator crash
-        return True
+    
+    return result
 
 
 def _wait_for_processing_complete(page: Page, timeout: int = 180000) -> bool:
@@ -1320,10 +1331,10 @@ def upload_to_tiktok(
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video file not found: {video_path}")
     
-    # Require explicit title - fail early if missing
-    # Title should come from clip metadata, not be auto-generated
+    # Require explicit title or caption - fail early if missing
+    # Title/caption should come from clip metadata, not be auto-generated
     if not title and not caption:
-        logger.error("Upload rejected: missing title - refusing to upload with garbage metadata")
+        logger.error("Upload rejected: missing title and caption - refusing to upload with empty metadata")
         raise ValueError("TikTok upload requires an explicit title or caption")
     
     # Extract browser settings from credentials

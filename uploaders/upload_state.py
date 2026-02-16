@@ -30,7 +30,7 @@ class UploadState(Enum):
 class RetryConfig:
     """Configuration for retry behavior."""
     max_attempts: int = 3
-    delays: list = None  # Delays in seconds between retries
+    delays: Optional[list[int]] = None  # Delays in seconds between retries
     
     def __post_init__(self):
         if self.delays is None:
