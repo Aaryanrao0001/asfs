@@ -458,54 +458,69 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                                         error_message=str(e))
                 raise
         
-        # Filter by minimum score threshold
-        min_score_threshold = config['model'].get('min_score_threshold', 60.0)
-        
+        # Rank-based top-K selection with per-episode score normalization
+        top_k = config['model'].get('top_k', 10)
+        absolute_min_score = config['model'].get('absolute_min_score', 30)
+
         logger.info("=" * 80)
-        logger.info(f"FILTERING WITH THRESHOLD: {min_score_threshold}")
+        logger.info(f"RANK-BASED SELECTION: top_k={top_k}, absolute_min_score={absolute_min_score}")
         logger.info("=" * 80)
-        
+
+        # Per-episode score normalization so the best clip always gets ~100
+        if scored_segments:
+            raw_scores = [s.get('final_score', 0) for s in scored_segments]
+            min_s = min(raw_scores)
+            max_s = max(raw_scores)
+            score_range = max_s - min_s
+            for seg in scored_segments:
+                if score_range == 0:
+                    # All clips have the same score — set normalized score to 100
+                    seg['normalized_score'] = 100.0
+                else:
+                    seg['normalized_score'] = round(
+                        100.0 * (seg.get('final_score', 0) - min_s) / score_range, 2
+                    )
+
+            # Log score distribution
+            logger.info(f"Score distribution: max={max_s:.1f}, avg={sum(raw_scores)/len(raw_scores):.1f}, min={min_s:.1f}")
+
+            # Extra warning if all scores are 0
+            if max_s == 0:
+                logger.warning("All scores are 0! This indicates a problem with AI scoring:")
+                logger.warning("  - Verify GITHUB_TOKEN (or AI API key) environment variable is set and valid")
+                logger.warning("  - Check API key has correct permissions for the model endpoint")
+                logger.warning("  - Review logs above for API or JSON parsing errors")
+
+        # Sort descending and take top-K; apply absolute floor as sanity check
+        candidates_sorted = sorted(
+            scored_segments,
+            key=lambda x: x.get('final_score', 0),
+            reverse=True,
+        )
         high_quality_segments = [
-            seg for seg in scored_segments 
-            if seg.get('final_score', 0) >= min_score_threshold
+            seg for seg in candidates_sorted[:top_k]
+            if seg.get('final_score', 0) >= absolute_min_score
         ]
-        
-        logger.info(f"[OK] High-quality segments (score >= {min_score_threshold}): {len(high_quality_segments)}")
-        
-        
+
+        logger.info(f"[OK] High-quality segments (top-{top_k}, score >= {absolute_min_score}): {len(high_quality_segments)}")
+
         if not high_quality_segments:
             logger.info("=" * 80)
             logger.warning("NO HIGH-QUALITY SEGMENTS FOUND")
             logger.info("=" * 80)
-            logger.warning(f"Current threshold: {min_score_threshold}")
-            
-            # Show score distribution
+
             if scored_segments:
-                scores = [s.get("final_score", 0) for s in scored_segments]
-                logger.warning(f"Score distribution:")
-                logger.warning(f"  Max: {max(scores):.1f}")
-                logger.warning(f"  Avg: {sum(scores)/len(scores):.1f}")
-                logger.warning(f"  Min: {min(scores):.1f}")
-                
-                # Extra warning if all scores are 0
-                if max(scores) == 0:
-                    logger.warning("")
-                    logger.warning("All scores are 0! This indicates a problem with AI scoring:")
-                    logger.warning("  - Verify GITHUB_TOKEN (or AI API key) environment variable is set and valid")
-                    logger.warning("  - Check API key has correct permissions for the model endpoint")
-                    logger.warning("  - Review logs above for API or JSON parsing errors")
-                    logger.warning("")
-            
-            logger.warning("Suggestions:")
-            if scored_segments and max(scores) == 0:
-                logger.warning("  1. Fix the AI scoring issue above (API key, permissions, etc.)")
-                logger.warning("  2. Use --no-cache to force complete re-processing")
-            else:
-                logger.warning("  1. Lower min_score_threshold in config/model.yaml")
-                logger.warning("     (Cache will auto-invalidate and re-score)")
-                logger.warning("  2. Use --no-cache to force complete re-processing")
+                raw_scores = [s.get("final_score", 0) for s in scored_segments]
+                logger.warning("Suggestions:")
+                if max(raw_scores) == 0:
+                    logger.warning("  1. Fix the AI scoring issue above (API key, permissions, etc.)")
+                    logger.warning("  2. Use --no-cache to force complete re-processing")
+                else:
+                    logger.warning("  1. Lower absolute_min_score in config/model.yaml")
+                    logger.warning("     (Cache will auto-invalidate and re-score)")
+                    logger.warning("  2. Use --no-cache to force complete re-processing")
             logger.info("=" * 80)
-            
+
             audit.log_pipeline_event("pipeline", "completed", video_path,
                                     {"clips": 0, "reason": "No high-quality segments"})
             return

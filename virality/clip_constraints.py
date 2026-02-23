@@ -2,7 +2,7 @@
 Phase 4 – Clip Construction Constraints.
 
 Filters and selects candidates that satisfy:
-- Duration: 20–60 seconds total
+- Duration: 15–60 seconds total
 - Must start with a top-20% hook sentence
 - Must end with a high-impact sentence (by delivery_intensity)
 - Coherence threshold (shared speaker / topic overlap)
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # ── public configuration defaults ─────────────────────────────────────────
 
-MIN_DURATION: float = 20.0   # seconds
+MIN_DURATION: float = 15.0   # seconds
 MAX_DURATION: float = 60.0   # seconds
 TARGET_MIN_CANDIDATES: int = 20
 TARGET_MAX_CANDIDATES: int = 50
@@ -26,7 +26,7 @@ TARGET_MAX_CANDIDATES: int = 50
 HOOK_TOP_FRACTION: float = 0.20
 
 # Minimum coherence score (0–1) to accept a candidate
-DEFAULT_COHERENCE_THRESHOLD: float = 0.25
+DEFAULT_COHERENCE_THRESHOLD: float = 0.15
 
 # Composite constraint_score weights
 # hook_score and impact_score are 0–10; scale factor brings them to ~0–0.25
