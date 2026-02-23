@@ -15,7 +15,7 @@ model:
   
   # Scoring configuration
   max_segments_to_score: 50
-  min_score_threshold: 6.0
+  min_score_threshold: 60.0
   
   # Rate limiting and batching
   batch_size: 6  # Segments per API call
@@ -35,7 +35,7 @@ model:
   top_clips: 10  # Number of top clips to return after full analysis
   
   # Hook Quality (First 7 Seconds)
-  min_hook_score: 6.0  # Minimum hook score (0-10) to pass filter
+  min_hook_score: 5.0  # Minimum hook score (0-10) to pass filter
   
   # Semantic Deduplication
   similarity_threshold: 0.85  # Cosine similarity threshold (0-1) for duplicates

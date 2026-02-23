@@ -116,13 +116,13 @@ class EnhancedViralPipeline:
         duration_filtered = []
         for candidate in arc_enhanced:
             duration = candidate.get('duration', 0)
-            # Accept 15-75s clips (covers all platforms)
-            if 15 <= duration <= 75:
+            # Accept 15-90s clips (covers all platforms)
+            if 15 <= duration <= 90:
                 duration_filtered.append(candidate)
         
         logger.info(
             f"Duration filter: {len(duration_filtered)}/{len(arc_enhanced)} "
-            f"(15-75s)"
+            f"(15-90s)"
         )
         
         logger.info(

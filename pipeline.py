@@ -445,7 +445,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                 raise
         
         # Filter by minimum score threshold
-        min_score_threshold = config['model'].get('min_score_threshold', 6.0)
+        min_score_threshold = config['model'].get('min_score_threshold', 60.0)
         
         logger.info("=" * 80)
         logger.info(f"FILTERING WITH THRESHOLD: {min_score_threshold}")
@@ -453,7 +453,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         
         high_quality_segments = [
             seg for seg in scored_segments 
-            if seg.get('overall_score', 0) >= min_score_threshold
+            if seg.get('final_score', 0) >= min_score_threshold
         ]
         
         logger.info(f"[OK] High-quality segments (score >= {min_score_threshold}): {len(high_quality_segments)}")
@@ -467,7 +467,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
             
             # Show score distribution
             if scored_segments:
-                scores = [s.get("overall_score", 0) for s in scored_segments]
+                scores = [s.get("final_score", 0) for s in scored_segments]
                 logger.warning(f"Score distribution:")
                 logger.warning(f"  Max: {max(scores):.1f}")
                 logger.warning(f"  Avg: {sum(scores)/len(scores):.1f}")
