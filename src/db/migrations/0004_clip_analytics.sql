@@ -4,8 +4,9 @@
 -- New columns on clips table
 ALTER TABLE clips ADD COLUMN variant_type TEXT;
 ALTER TABLE clips ADD COLUMN hook_timestamp REAL;
-ALTER TABLE clips ADD COLUMN recut_applied BOOLEAN;
-ALTER TABLE clips ADD COLUMN first_2s_interrupt BOOLEAN;
+-- NULL = not yet analysed; 1 = true; 0 = false (three-state flag)
+ALTER TABLE clips ADD COLUMN recut_applied INTEGER DEFAULT NULL;
+ALTER TABLE clips ADD COLUMN first_2s_interrupt INTEGER DEFAULT NULL;
 ALTER TABLE clips ADD COLUMN controversy_score REAL;
 ALTER TABLE clips ADD COLUMN novelty_score REAL;
 ALTER TABLE clips ADD COLUMN hashtag_mode_used TEXT;
