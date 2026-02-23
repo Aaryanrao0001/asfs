@@ -117,6 +117,26 @@ class MetadataTab(QWidget):
         self.hashtag_prefix.stateChanged.connect(self.on_settings_changed)
         tags_layout.addWidget(self.hashtag_prefix)
         
+        # Hashtag mode selector
+        hashtag_mode_layout = QHBoxLayout()
+        hashtag_mode_layout.addWidget(QLabel("Hashtag Mode:"))
+        
+        self.hashtag_mode_selector = QComboBox()
+        self.hashtag_mode_selector.addItems(["Append (AI after user)", "Strict (user only)", "AI Only"])
+        self.hashtag_mode_selector.setCurrentIndex(0)
+        self.hashtag_mode_selector.currentTextChanged.connect(self.on_settings_changed)
+        hashtag_mode_layout.addWidget(self.hashtag_mode_selector)
+        hashtag_mode_layout.addStretch()
+        
+        tags_layout.addLayout(hashtag_mode_layout)
+        
+        self.hashtag_mode_hint = QLabel(
+            "Append: add AI tags after yours  •  Strict: only your tags  •  AI Only: ignore your tags"
+        )
+        self.hashtag_mode_hint.setProperty("subheading", True)
+        self.hashtag_mode_hint.setWordWrap(True)
+        tags_layout.addWidget(self.hashtag_mode_hint)
+        
         layout.addWidget(tags_group)
         
         # CSV Import (NEW)
@@ -320,6 +340,14 @@ class MetadataTab(QWidget):
         """Get metadata settings."""
         mode = "randomized" if self.mode_selector.currentText() == "Randomized" else "uniform"
         
+        # Map display text to internal mode key
+        hashtag_mode_map = {
+            "Append (AI after user)": "append",
+            "Strict (user only)": "strict",
+            "AI Only": "ai_only"
+        }
+        hashtag_mode = hashtag_mode_map.get(self.hashtag_mode_selector.currentText(), "append")
+        
         return {
             "mode": mode,
             "title": self.title_input.toPlainText(),
@@ -327,6 +355,7 @@ class MetadataTab(QWidget):
             "caption": self.caption_input.toPlainText(),
             "tags": self.tags_input.text(),
             "hashtag_prefix": self.hashtag_prefix.isChecked(),
+            "hashtag_mode": hashtag_mode,
             "hook_phrase": self.hook_phrase_input.text(),
             "hook_position": self.hook_position_selector.currentText(),
             "logo_path": self.logo_path_input.text(),
@@ -353,6 +382,15 @@ class MetadataTab(QWidget):
         
         if "hashtag_prefix" in settings:
             self.hashtag_prefix.setChecked(settings["hashtag_prefix"])
+        
+        if "hashtag_mode" in settings:
+            mode_display_map = {
+                "append": "Append (AI after user)",
+                "strict": "Strict (user only)",
+                "ai_only": "AI Only"
+            }
+            display_text = mode_display_map.get(settings["hashtag_mode"], "Append (AI after user)")
+            self.hashtag_mode_selector.setCurrentText(display_text)
         
         if "hook_phrase" in settings:
             self.hook_phrase_input.setText(settings["hook_phrase"])

@@ -5,8 +5,27 @@ Handles uniform and randomized metadata generation.
 """
 
 import random
-from typing import Dict, List
+from typing import Dict, List, Optional
 from .config import MetadataConfig
+
+
+def resolve_description(user_description: Optional[str], ai_description: str) -> str:
+    """
+    Resolve final description with strict user priority.
+
+    User-provided description always wins over AI-generated one.
+    No merging, enhancing, or optimizing.
+
+    Args:
+        user_description: Description provided by the user (may be None or empty)
+        ai_description: AI-generated description (fallback)
+
+    Returns:
+        User description if non-empty, otherwise ai_description
+    """
+    if user_description and user_description.strip():
+        return user_description.strip()
+    return ai_description
 
 
 def resolve_metadata(config: MetadataConfig) -> Dict[str, str]:

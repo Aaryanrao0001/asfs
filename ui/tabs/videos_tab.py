@@ -853,14 +853,14 @@ class VideosTab(QWidget):
                     duration_text = "N/A"
                 duration_item = QTableWidgetItem(duration_text)
                 duration_item.setTextAlignment(Qt.AlignCenter)
-                self.videos_table.setItem(row, 2, duration_item)
+                self.videos_table.setItem(row, 1, duration_item)
                 
                 # File size
                 file_size = self.video_registry.get_file_size(video_id)
                 size_text = self.format_file_size(file_size)
                 size_item = QTableWidgetItem(size_text)
                 size_item.setTextAlignment(Qt.AlignCenter)
-                self.videos_table.setItem(row, 3, size_item)
+                self.videos_table.setItem(row, 2, size_item)
                 
                 # Platform statuses
                 uploads = video.get('uploads', {})
@@ -871,7 +871,7 @@ class VideosTab(QWidget):
                 instagram_item = QTableWidgetItem(instagram_icon)
                 instagram_item.setTextAlignment(Qt.AlignCenter)
                 instagram_item.setToolTip(self.get_status_tooltip(instagram_info))
-                self.videos_table.setItem(row, 4, instagram_item)
+                self.videos_table.setItem(row, 3, instagram_item)
                 
                 # TikTok
                 tiktok_info = uploads.get('TikTok')
@@ -879,7 +879,7 @@ class VideosTab(QWidget):
                 tiktok_item = QTableWidgetItem(tiktok_icon)
                 tiktok_item.setTextAlignment(Qt.AlignCenter)
                 tiktok_item.setToolTip(self.get_status_tooltip(tiktok_info))
-                self.videos_table.setItem(row, 5, tiktok_item)
+                self.videos_table.setItem(row, 4, tiktok_item)
                 
                 # YouTube
                 youtube_info = uploads.get('YouTube')
@@ -887,7 +887,7 @@ class VideosTab(QWidget):
                 youtube_item = QTableWidgetItem(youtube_icon)
                 youtube_item.setTextAlignment(Qt.AlignCenter)
                 youtube_item.setToolTip(self.get_status_tooltip(youtube_info))
-                self.videos_table.setItem(row, 6, youtube_item)
+                self.videos_table.setItem(row, 5, youtube_item)
                 
                 # Duplicate toggle
                 duplicate_allowed = bool(video.get('duplicate_allowed', 0))
@@ -903,7 +903,7 @@ class VideosTab(QWidget):
                 )
                 duplicate_layout.addWidget(duplicate_checkbox)
                 
-                self.videos_table.setCellWidget(row, 7, duplicate_widget)
+                self.videos_table.setCellWidget(row, 6, duplicate_widget)
                 
                 # Actions (Upload + Edit + Delete buttons)
                 actions_widget = QWidget()
@@ -966,13 +966,13 @@ class VideosTab(QWidget):
                 )
                 actions_layout.addWidget(delete_btn)
                 
-                self.videos_table.setCellWidget(row, 8, actions_widget)
+                self.videos_table.setCellWidget(row, 7, actions_widget)
                 
                 # File Path
                 file_path = video.get('file_path', '')
                 file_path_item = QTableWidgetItem(file_path)
                 file_path_item.setToolTip(file_path)
-                self.videos_table.setItem(row, 9, file_path_item)
+                self.videos_table.setItem(row, 8, file_path_item)
             
             logger.debug(f"Refreshed videos table: {len(videos)} videos")
             
@@ -1083,7 +1083,8 @@ class VideosTab(QWidget):
                         hashtag_prefix=metadata_settings.get("hashtag_prefix", True),
                         hook_phrase=metadata_settings.get("hook_phrase", ""),
                         hook_position=metadata_settings.get("hook_position", "Top Left"),
-                        logo_path=metadata_settings.get("logo_path", "")
+                        logo_path=metadata_settings.get("logo_path", ""),
+                        hashtag_mode=metadata_settings.get("hashtag_mode", "append")
                     )
                     
                     metadata = resolve_metadata(config)
