@@ -39,6 +39,12 @@ def extract_clips(
     for idx, clip in enumerate(clips):
         start_time = clip["start"]
         end_time = clip["end"]
+
+        # Hard clamp: never extract more than 60 seconds regardless of metadata
+        MAX_CLIP_SECONDS = 60.0
+        if (end_time - start_time) > MAX_CLIP_SECONDS:
+            end_time = start_time + MAX_CLIP_SECONDS
+
         duration = end_time - start_time
         
         # Generate clip filename
