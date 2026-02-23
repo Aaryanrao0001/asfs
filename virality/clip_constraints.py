@@ -169,49 +169,9 @@ def apply_clip_constraints(
     # Sort by composite score
     passed.sort(key=lambda x: x.get("constraint_score", 0), reverse=True)
 
-    # Enforce target range
+    # Enforce target max
     if len(passed) > target_max:
         passed = passed[:target_max]
-    elif len(passed) < target_min:
-        logger.info(
-            f"apply_clip_constraints: only {len(passed)} candidates pass "
-            f"constraints (target_min={target_min}). Relaxing duration "
-            f"filter to surface more candidates."
-        )
-        # Build a set of unit-index frozensets already in `passed` for O(1) lookup
-        passed_keys: set = {
-            frozenset(c.get("unit_indices", [])) for c in passed
-        }
-        # Relax duration filter to reach target_min
-        extra: List[Dict] = []
-        for c in candidates:
-            if frozenset(c.get("unit_indices", [])) in passed_keys:
-                continue
-            duration = c.get("duration", 0.0)
-            if duration <= 0 or duration > max_duration:
-                continue
-            coherence = _coherence_score(c, unit_map)
-            if coherence < coherence_threshold:
-                continue
-            first_hook = _hook_score_of_first_unit(c, unit_map)
-            last_impact = _impact_score_of_last_unit(c, unit_map)
-            enriched = dict(c)
-            enriched["hook_score_first"] = round(first_hook, 3)
-            enriched["impact_score_last"] = round(last_impact, 3)
-            enriched["coherence"] = round(coherence, 3)
-            enriched["constraint_score"] = round(
-                enriched["pattern_score"] * 0.40
-                + first_hook * _HOOK_IMPACT_WEIGHT
-                + last_impact * _HOOK_IMPACT_WEIGHT
-                + coherence * _COHERENCE_SCALE,
-                4,
-            )
-            extra.append(enriched)
-
-        extra.sort(key=lambda x: x.get("constraint_score", 0), reverse=True)
-        needed = target_min - len(passed)
-        passed += extra[:needed]
-        passed.sort(key=lambda x: x.get("constraint_score", 0), reverse=True)
 
     logger.info(
         f"apply_clip_constraints: {len(passed)} candidates pass "

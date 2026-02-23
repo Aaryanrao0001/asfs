@@ -13,8 +13,7 @@ If you cannot evaluate the segment, return:
   "relatability_score": 0,
   "completion_score": 0,
   "platform_fit_score": 0,
-  "final_score": 0,
-  "verdict": "skip",
+  "final_score": 0.0,
   "key_strengths": [],
   "key_weaknesses": ["Unable to evaluate"],
   "first_3_seconds": "",
@@ -238,11 +237,6 @@ CRITICAL OVERRIDE RULES (apply AFTER calculation):
 - If duration > 60s → subtract 20 from FINAL_SCORE
 - If starts with greeting → cap FINAL_SCORE at 40
 
-VERDICT THRESHOLDS:
-- 75-100: "viral"
-- 55-74: "maybe"
-- 0-54: "skip"
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT (STRICT JSON ONLY)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -257,7 +251,6 @@ Return ONLY this JSON. NO markdown. NO explanations. NO backticks.
   "completion_score": <0-10>,
   "platform_fit_score": <0-10>,
   "final_score": <0-100>,
-  "verdict": "viral|maybe|skip",
   "key_strengths": [
     "<concise reason>",
     "<concise reason>"
