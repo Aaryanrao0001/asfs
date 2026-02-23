@@ -49,6 +49,12 @@ load_dotenv()
 # Import pipeline modules
 from transcript import transcribe_video, check_transcript_quality, extract_audio
 from transcript.transcribe import load_transcript, load_and_validate_transcript
+from transcript.fallback import (
+    generate_fallback_title,
+    generate_fallback_description,
+    load_transcript_if_exists,
+    transcribe_first_30_seconds,
+)
 from segmenter import build_sentence_windows, build_pause_windows
 from virality.reconstruction_engine import reconstruct_clips
 from ai import score_segments, score_segments_enhanced
@@ -75,6 +81,49 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_transcript_fallbacks(
+    video_file: str,
+    title: str,
+    caption: str,
+    work_dir: str = None,
+) -> tuple:
+    """
+    Apply transcript-based fallback when *title* is empty.
+
+    Tries to load an existing transcript first; if none found, transcribes
+    only the first 30 seconds of *video_file*.  Never re-transcribes a full
+    video.
+
+    Parameters
+    ----------
+    video_file : str
+        Path to the clip/video file.
+    title : str
+        Current title value (may be empty).
+    caption : str
+        Current caption / description value (may be empty).
+    work_dir : str | None
+        Optional working directory for temporary audio files.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(title, caption)`` — updated values.
+    """
+    if title:
+        return title, caption
+
+    _transcript = load_transcript_if_exists(video_file)
+    if not _transcript:
+        _transcript = transcribe_first_30_seconds(video_file, work_dir)
+
+    title = generate_fallback_title(_transcript)
+    if not caption:
+        caption = generate_fallback_description(_transcript)
+
+    return title, caption
 
 
 def load_config() -> Dict:
@@ -769,6 +818,11 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                     # This ensures title is set explicitly before calling uploader
                     title = caption[:100] if caption else f"Clip {clip_id}"
                     
+                    # Fallback: if title is still empty, derive from transcript
+                    title, caption = _apply_transcript_fallbacks(
+                        video_file, title, caption, work_dir
+                    )
+                    
                     upload_id = None
                     
                     if platform == "TikTok":
@@ -970,6 +1024,9 @@ def run_upload_stage(video_id: str, platform: str, metadata: Dict = None) -> boo
         description = ''
         caption = ''
         hashtags = []
+    
+    # Fallback: if title is empty, derive it from an existing or partial transcript
+    title, description = _apply_transcript_fallbacks(video_file, title, description)
     
     # Record upload start
     video_registry.record_upload_attempt(video_id, platform, "IN_PROGRESS")
