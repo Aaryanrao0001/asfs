@@ -71,10 +71,19 @@ def _make_candidate(
         indices[i + 1] - indices[i] == 1 for i in range(len(indices) - 1)
     )
 
+    # For non-contiguous clips the actual playback duration is the sum of
+    # individual unit durations, not the full timeline span (end - start).
+    if is_contiguous:
+        duration = round(end - start, 3)
+    else:
+        duration = round(
+            sum(u.get("end", 0.0) - u.get("start", 0.0) for u in ordered), 3
+        )
+
     return {
         "start": start,
         "end": end,
-        "duration": round(end - start, 3),
+        "duration": duration,
         "text": text,
         "pattern": pattern_name,
         "pattern_score": round(pattern_score, 3),

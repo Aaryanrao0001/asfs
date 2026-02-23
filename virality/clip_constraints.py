@@ -188,7 +188,7 @@ def apply_clip_constraints(
             if frozenset(c.get("unit_indices", [])) in passed_keys:
                 continue
             duration = c.get("duration", 0.0)
-            if duration <= 0:
+            if duration <= 0 or duration > max_duration:
                 continue
             coherence = _coherence_score(c, unit_map)
             if coherence < coherence_threshold:
