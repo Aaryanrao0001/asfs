@@ -46,15 +46,15 @@ class TestCalibrator(unittest.TestCase):
         self.assertGreaterEqual(score, 0)
         self.assertLessEqual(score, 100)
 
-    def test_low_hook_caps_at_50(self):
+    def test_low_hook_caps_at_45(self):
         from scoring.calibrator import compute_final_score
         score = compute_final_score(self._data(hook_score=3.0), duration=30)
-        self.assertLessEqual(score, 50)
+        self.assertLessEqual(score, 45)
 
-    def test_low_emotion_caps_at_60(self):
+    def test_low_emotion_caps_at_45(self):
         from scoring.calibrator import compute_final_score
         score = compute_final_score(self._data(emotion_score=2.0), duration=30)
-        self.assertLessEqual(score, 60)
+        self.assertLessEqual(score, 45)
 
     def test_long_duration_penalty(self):
         from scoring.calibrator import compute_final_score

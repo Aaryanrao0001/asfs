@@ -26,10 +26,10 @@ def compute_final_score(data: dict, duration: float) -> int:
 
     # Override rules applied after base calculation
     if data["hook_score"] < HOOK_CAP:
-        score = min(score, 50)
+        score = min(score, 45)
 
     if data["emotion_score"] < EMOTION_CAP:
-        score = min(score, 60)
+        score = min(score, 45)
 
     if duration > MAX_DURATION:
         score -= 20
