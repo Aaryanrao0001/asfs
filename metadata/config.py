@@ -32,6 +32,9 @@ class MetadataConfig:
     # Hashtag prefix toggle
     hashtag_prefix: bool = True
     
+    # Hashtag mode: "strict" | "append" | "ai_only"
+    hashtag_mode: str = "append"
+    
     # Hook phrase for video overlay (NEW)
     hook_phrase: str = ""
     hook_position: str = "Top Left"
@@ -57,7 +60,8 @@ class MetadataConfig:
     def from_ui_values(cls, mode: str, title_input: str, description_input: str, 
                        caption_input: str, tags_input: str, hashtag_prefix: bool = True,
                        hook_phrase: str = "", hook_position: str = "Top Left",
-                       logo_path: str = "", csv_file_path: str = "") -> 'MetadataConfig':
+                       logo_path: str = "", csv_file_path: str = "",
+                       hashtag_mode: str = "append") -> 'MetadataConfig':
         """
         Create MetadataConfig from UI input values.
         
@@ -113,6 +117,7 @@ class MetadataConfig:
             captions=captions if captions else [""],
             tags=tags,
             hashtag_prefix=hashtag_prefix,
+            hashtag_mode=hashtag_mode,
             hook_phrase=hook_phrase,
             hook_position=hook_position,
             logo_path=logo_path,
@@ -128,6 +133,7 @@ class MetadataConfig:
             "captions": self.captions,
             "tags": self.tags,
             "hashtag_prefix": self.hashtag_prefix,
+            "hashtag_mode": self.hashtag_mode,
             "hook_phrase": self.hook_phrase,
             "hook_position": self.hook_position,
             "logo_path": self.logo_path,
@@ -144,6 +150,7 @@ class MetadataConfig:
             captions=data.get("captions", [""]),
             tags=data.get("tags", []),
             hashtag_prefix=data.get("hashtag_prefix", True),
+            hashtag_mode=data.get("hashtag_mode", "append"),
             hook_phrase=data.get("hook_phrase", ""),
             hook_position=data.get("hook_position", "Top Left"),
             logo_path=data.get("logo_path", ""),
