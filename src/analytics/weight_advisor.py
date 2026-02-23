@@ -95,7 +95,7 @@ def generate_report(db_path: str) -> str:
         )
 
     lines = ["# Weight Advisor Report\n"]
-    lines.append(f"**Clips analysed:** {len(data)}\n")
+    lines.append(f"**Clips analyzed:** {len(data)}\n")
 
     # Group by platform
     platforms = sorted({d.get("platform", "unknown") for d in data})

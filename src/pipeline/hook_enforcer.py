@@ -175,17 +175,17 @@ def enforce_hook(
         segment["hook_metadata"] = hook_metadata
         return segment
 
-    # --- Scan for best peak ---
-    peak = _find_best_peak(seg_tokens, segment_duration)
+    # --- Scan for best peak (offset relative to segment start) ---
+    peak_offset = _find_best_peak(seg_tokens, segment_duration)
 
-    if peak is None:
+    if peak_offset is None:
         hook_metadata["hook_found"] = False
         segment["recut_failed"] = True
         segment["hook_metadata"] = hook_metadata
         return segment
 
     # Compute new start: pre-hook buffer before peak
-    new_start = segment_start + peak - PRE_HOOK_BUFFER
+    new_start = segment_start + peak_offset - PRE_HOOK_BUFFER
     new_start = max(new_start, segment_start)  # clamp to segment start
 
     # Compute new end: preferred duration from new_start, clamped
@@ -198,7 +198,7 @@ def enforce_hook(
         new_start = max(segment_start, new_end - PREFERRED_MIN_DURATION)
 
     hook_metadata["hook_found"] = True
-    hook_metadata["hook_timestamp"] = segment_start + peak
+    hook_metadata["hook_timestamp"] = segment_start + peak_offset
     hook_metadata["recut_applied"] = True
     hook_metadata["recut_source"] = "mid_segment"
 
@@ -208,7 +208,7 @@ def enforce_hook(
 
     logger.info(
         "Recut applied: new window %.1f–%.1f (peak at %.1f)",
-        new_start, new_end, segment_start + peak,
+        new_start, new_end, segment_start + peak_offset,
     )
 
     return segment

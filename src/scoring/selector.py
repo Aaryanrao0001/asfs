@@ -84,12 +84,11 @@ def select_clips(
     # If fewer than min_clips, fill from the top scoring candidates
     if len(selected) < min_clips:
         sorted_all = sorted(candidates, key=lambda c: c.get(score_key, 0.0), reverse=True)
-        already = {id(c) for c in selected}
+        selected_scores = {c.get(score_key, 0.0) for c in selected}
         for c in sorted_all:
-            if id(c) not in already and len(selected) < min_clips:
+            if c not in selected and len(selected) < min_clips:
                 c["low_confidence"] = True
                 selected.append(c)
-                already.add(id(c))
 
     # Mark confidence flag
     for c in selected:

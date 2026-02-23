@@ -55,7 +55,7 @@ def _select_cta(controversy_score: float, cta_type: str) -> str:
     if controversy_score > 7.0 and cta_type == "comment":
         # Prefer the polarising prompt for high-controversy clips
         return bucket[0]
-    return bucket[0]
+    return bucket[-1] if len(bucket) > 1 else bucket[0]
 
 
 def _derive_headline(
