@@ -87,15 +87,13 @@ class EnhancedViralPipeline:
             emotion_analysis = self.emotion_analyzer.analyze_text(text)
             candidate['emotion_analysis'] = emotion_analysis
             candidate['emotion_density'] = self.emotion_analyzer.get_emotion_density(text)
-        
-        # Filter by emotion density (top 15%)
-        candidates.sort(key=lambda x: x.get('emotion_density', 0), reverse=True)
-        emotion_threshold_idx = int(len(candidates) * 0.15)
-        emotion_filtered = candidates[:max(emotion_threshold_idx, 10)]  # At least 10
-        
+
+        # Keep all candidates (emotion density stored for reference, not used to filter)
+        emotion_filtered = candidates
+
         logger.info(
             f"Emotion filter: {len(emotion_filtered)}/{len(candidates)} "
-            f"(top 15% emotion-dense)"
+            f"(all candidates kept for subsequent filters)"
         )
         
         # Step 2: Hook quality filter (first 7 seconds)

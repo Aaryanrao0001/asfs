@@ -42,7 +42,7 @@ class ViralScoringEngine:
       1. Batch segments → LLM (component scores only, no final math)
       2. Extract component scores via parser
       3. Compute deterministic final score via calibrator
-      4. Rank by percentile and assign verdicts
+      4. Assign verdicts by absolute threshold (75+ viral, 55+ maybe, else skip)
     """
 
     def __init__(
@@ -127,20 +127,19 @@ class ViralScoringEngine:
     @staticmethod
     def _rank_percentile(segments: List[Dict]) -> List[Dict]:
         """
-        Sort segments by final_score and assign relative-percentile verdicts.
+        Sort segments by final_score and assign absolute-threshold verdicts.
 
-        Top 15 %  → "viral"
-        Next 25 % → "maybe"
-        Rest      → "skip"
+        75–100 → "viral"
+        55–74  → "maybe"
+        0–54   → "skip"
         """
         segments.sort(key=lambda x: x.get("final_score", 0), reverse=True)
-        total = len(segments)
 
-        for i, seg in enumerate(segments):
-            percentile = i / total if total > 0 else 0
-            if percentile <= 0.15:
+        for seg in segments:
+            score = seg.get("final_score", 0)
+            if score >= 75:
                 seg["verdict"] = "viral"
-            elif percentile <= 0.40:
+            elif score >= 55:
                 seg["verdict"] = "maybe"
             else:
                 seg["verdict"] = "skip"

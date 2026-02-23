@@ -213,7 +213,6 @@ Return JSON with array of scores:
       "completion_score": <0-10>,
       "platform_fit_score": <0-10>,
       "final_score": <0-100>,
-      "verdict": "viral|maybe|skip",
       "key_strengths": ["strength 1", "strength 2"],
       "key_weaknesses": ["weakness 1"],
       "first_3_seconds": "exact quote from first 3 seconds",
@@ -303,12 +302,19 @@ def process_single_segment_response(segment: Dict, ai_analysis: Dict, idx: int) 
         final_score = extract_score_safe(ai_analysis, 'final_score', 0.0)
         
         # Extract other fields
-        verdict = ai_analysis.get('verdict', 'skip')
         key_strengths = ai_analysis.get('key_strengths', [])
         key_weaknesses = ai_analysis.get('key_weaknesses', [])
         first_3_seconds = ai_analysis.get('first_3_seconds', '')
         primary_emotion = ai_analysis.get('primary_emotion', 'neutral')
         optimal_platform = ai_analysis.get('optimal_platform', 'none')
+
+        # Verdict computed Python-side from final_score (not from LLM)
+        if final_score >= 75:
+            verdict = 'viral'
+        elif final_score >= 55:
+            verdict = 'maybe'
+        else:
+            verdict = 'skip'
         
         # Create scored segment
         scored_segment = {
@@ -355,7 +361,7 @@ def create_fallback_segment(segment: Dict) -> Dict:
         'completion_score': 0.0,
         'platform_fit_score': 0.0,
         'final_score': 0.0,
-        'verdict': 'skip',
+        'verdict': 'skip',  # 0.0 < 55, so always skip
         'key_strengths': [],
         'key_weaknesses': ['AI scoring failed'],
         'first_3_seconds': '',
