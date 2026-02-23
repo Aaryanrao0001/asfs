@@ -28,6 +28,9 @@ HOOK_TOP_FRACTION: float = 0.20
 # Minimum coherence score (0–1) to accept a candidate
 DEFAULT_COHERENCE_THRESHOLD: float = 0.15
 
+# Time-diversity bin width: only one candidate is kept per this many seconds
+TIME_DIVERSITY_BIN_SECONDS: float = 60.0
+
 # Composite constraint_score weights
 # hook_score and impact_score are 0–10; scale factor brings them to ~0–0.25
 _HOOK_IMPACT_WEIGHT: float = 0.025
@@ -169,12 +172,29 @@ def apply_clip_constraints(
     # Sort by composite score
     passed.sort(key=lambda x: x.get("constraint_score", 0), reverse=True)
 
+    # Time-diversity: cluster by fixed-width bins and keep the top-scored
+    # candidate per bin so that all returned clips are spread across the
+    # episode rather than collapsing onto the same start region.
+    bin_seen: Dict[int, bool] = {}
+    diverse: List[Dict] = []
+    for candidate in passed:
+        bin_idx = int(candidate.get("start", 0.0) // TIME_DIVERSITY_BIN_SECONDS)
+        if bin_idx not in bin_seen:
+            bin_seen[bin_idx] = True
+            diverse.append(candidate)
+
+    # Fall back to the full sorted list if diversity filtering is too aggressive
+    # (removes more than 75% of candidates), preserving at least a quarter of results.
+    if len(diverse) < max(1, target_max // 4):
+        diverse = passed
+
     # Enforce target max
-    if len(passed) > target_max:
-        passed = passed[:target_max]
+    if len(diverse) > target_max:
+        diverse = diverse[:target_max]
 
     logger.info(
-        f"apply_clip_constraints: {len(passed)} candidates pass "
-        f"(duration {min_duration}–{max_duration}s, coherence≥{coherence_threshold})"
+        f"apply_clip_constraints: {len(diverse)} candidates pass "
+        f"(duration {min_duration}–{max_duration}s, coherence≥{coherence_threshold}, "
+        f"time-diverse bins={len(bin_seen)})"
     )
-    return passed
+    return diverse
