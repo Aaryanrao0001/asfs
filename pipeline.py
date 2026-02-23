@@ -50,6 +50,7 @@ load_dotenv()
 from transcript import transcribe_video, check_transcript_quality, extract_audio
 from transcript.transcribe import load_transcript, load_and_validate_transcript
 from segmenter import build_sentence_windows, build_pause_windows
+from virality.reconstruction_engine import reconstruct_clips
 from ai import score_segments, score_segments_enhanced
 from validator import deduplicate_clips, remove_overlapping_clips
 from clipper import extract_clips
@@ -328,17 +329,31 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
             audit.log_pipeline_event("segmentation", "started", video_path)
             
             try:
-                # Build sentence-based windows
-                sentence_candidates = build_sentence_windows(transcript_data)
-                logger.info(f"[OK] Sentence-based candidates: {len(sentence_candidates)}")
-                
-                # Build pause-based windows
-                pause_candidates = build_pause_windows(transcript_data)
-                logger.info(f"[OK] Pause-based candidates: {len(pause_candidates)}")
-                
-                # Combine candidates
-                all_candidates = sentence_candidates + pause_candidates
-                logger.info(f"[OK] Total candidates: {len(all_candidates)}")
+                # Use the Dynamic Clip Reconstruction Engine when enabled.
+                use_reconstruction = config.get('model', {}).get(
+                    'use_reconstruction_engine', True
+                )
+
+                if use_reconstruction:
+                    logger.info("Using Dynamic Clip Reconstruction Engine")
+                    reconstruction_config = config.get('reconstruction', {})
+                    all_candidates = reconstruct_clips(
+                        transcript_data,
+                        config=reconstruction_config,
+                    )
+                    logger.info(
+                        f"[OK] Reconstruction engine candidates: {len(all_candidates)}"
+                    )
+                else:
+                    # Legacy: contiguous window extraction
+                    sentence_candidates = build_sentence_windows(transcript_data)
+                    logger.info(f"[OK] Sentence-based candidates: {len(sentence_candidates)}")
+                    
+                    pause_candidates = build_pause_windows(transcript_data)
+                    logger.info(f"[OK] Pause-based candidates: {len(pause_candidates)}")
+                    
+                    all_candidates = sentence_candidates + pause_candidates
+                    logger.info(f"[OK] Total candidates: {len(all_candidates)}")
                 
                 audit.log_pipeline_event("segmentation", "completed", video_path,
                                         {"total_candidates": len(all_candidates)})
@@ -348,8 +363,7 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                     pipeline_state['segmentation'] = {
                         'completed': True,
                         'candidates': all_candidates,
-                        'sentence_count': len(sentence_candidates),
-                        'pause_count': len(pause_candidates)
+                        'reconstruction': use_reconstruction,
                     }
                     cache.save_state(video_path, pipeline_state, 'segmentation')
                     

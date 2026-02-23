@@ -34,6 +34,15 @@ A **fully automated desktop application** that transforms long-form videos into 
 - 6-factor virality model (Curiosity 25%, Emotion 20%, Contrarian 20%, etc.)
 - See [VIRAL_DETECTION_GUIDE.md](VIRAL_DETECTION_GUIDE.md) for details
 
+**🔄 Dynamic Clip Reconstruction Engine (NEW)**
+- Replaces contiguous window extraction with intelligent sentence-level reconstruction
+- Phase 1 – Atomic Units: sentence-level unit builder using word timestamps, sentence boundaries, and speaker turns
+- Phase 2 – Sentence Scoring: per-sentence scores for hook, emotional charge, claim strength, identity trigger, energy, and delivery intensity
+- Phase 3 – Reordering Engine: non-contiguous sentence combinations assembled into *Hook → Context → Punchline*, *Strong claim → Data → Stronger claim*, and *Punchline first → Explanation → Reinforcement* patterns
+- Phase 4 – Clip Constraints: duration 20–60s, top-20% hook start, high-impact ending, coherence threshold, 20–50 candidates per episode
+- Phase 5 – Competitive Evaluation: LLM-scored on scroll-stop probability, share trigger, debate potential, clarity, and ending strength; top 3 returned
+- Fully integrated into the main pipeline; configure via `reconstruction` section in model config
+
 ## 🎯 Overview
 
 This system intelligently:

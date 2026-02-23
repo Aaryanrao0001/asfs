@@ -386,5 +386,162 @@ Implementation based on research in:
 
 ---
 
-**Version**: 2.0  
-**Last Updated**: 2026-02-11
+## Dynamic Clip Reconstruction Engine
+
+The **Dynamic Clip Reconstruction Engine** replaces the legacy contiguous window extraction with a five-phase flow that builds non-contiguous, intelligently reordered clips from individual sentence-level units.
+
+### Architecture Overview
+
+```
+Transcript Data
+      │
+      ▼
+Phase 1 ─ Atomic Units          (virality/atomic_units.py)
+      │   sentence-level units with timestamps, speaker, word count
+      ▼
+Phase 2 ─ Sentence Scoring      (virality/sentence_scorer.py)
+      │   hook_score, emotional_charge, claim_strength,
+      │   identity_trigger, energy_score, delivery_intensity
+      ▼
+Phase 3 ─ Reordering Engine     (virality/reorder_engine.py)
+      │   non-contiguous combinations in three patterns:
+      │   • Hook → Context → Punchline
+      │   • Strong claim → Data → Stronger claim
+      │   • Punchline first → Explanation → Reinforcement
+      ▼
+Phase 4 ─ Clip Constraints      (virality/clip_constraints.py)
+      │   duration 20–60 s, top-20% hook start, high-impact ending,
+      │   coherence threshold, 20–50 candidates
+      ▼
+Phase 5 ─ Competitive Evaluation (virality/competitive_eval.py)
+      │   LLM or heuristic scoring on:
+      │   scroll_stop_probability, share_trigger, debate_potential,
+      │   clarity, ending_strength
+      │   → top 3 candidates returned
+      ▼
+  Final Clips  (virality/reconstruction_engine.py orchestrates all phases)
+```
+
+### Phase 1 – Atomic Units
+
+`build_atomic_units(transcript_data, default_speaker="speaker_0")`
+
+- Splits each transcript segment into individual sentences.
+- When word-level timestamps are present (`words` key on segments), assigns precise per-sentence start/end times from the matching word tokens.
+- Falls back to proportional interpolation when word timestamps are absent.
+- Supports multi-speaker transcripts via the `speaker` field on each segment.
+
+Each unit carries: `start`, `end`, `text`, `speaker`, `word_count`, `index`.
+
+### Phase 2 – Sentence Scoring
+
+`score_all_units(units)` / `score_sentence_unit(unit)`
+
+Per-sentence dimension scores (0–10):
+
+| Dimension | What it measures |
+|-----------|-----------------|
+| `hook_score` | Attention-grabbing opening quality |
+| `emotional_charge` | Emotional intensity / valence |
+| `claim_strength` | Bold assertions, stats, specifics |
+| `identity_trigger` | "you" framing / personal relevance |
+| `energy_score` | Pace, exclamation marks, caps |
+| `delivery_intensity` | Composite energy + emotion proxy |
+
+All scores are persisted on each unit dict and available to later stages.
+
+### Phase 3 – Reordering Engine
+
+`generate_candidates(scored_units, k=5)`
+
+Builds candidate clips by combining top-*k* units per role across three patterns. Candidates are non-contiguous (constituent sentences need not be adjacent in the original transcript).  Units are sorted back into logical order (by `index`) within each candidate so playback is coherent.
+
+De-duplicates by constituent unit set and returns results sorted by `pattern_score` descending.
+
+### Phase 4 – Clip Construction Constraints
+
+`apply_clip_constraints(candidates, scored_units, ...)`
+
+Configuration:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `min_duration` | `20.0` | Minimum clip duration (seconds) |
+| `max_duration` | `60.0` | Maximum clip duration (seconds) |
+| `coherence_threshold` | `0.25` | Minimum coherence score (0–1) |
+| `target_min_candidates` | `20` | Minimum candidates to surface |
+| `target_max_candidates` | `50` | Maximum candidates to return |
+
+When fewer than `target_min_candidates` survive the strict filters, the duration constraint is relaxed to surface additional candidates.
+
+Each passing candidate is annotated with `hook_score_first`, `impact_score_last`, `coherence`, and a composite `constraint_score`.
+
+### Phase 5 – Competitive Evaluation
+
+`competitive_evaluate(candidates, llm_scorer=None, top_n=3)`
+
+Treats candidates as competitors.  When `llm_scorer` is provided it should be a callable `(candidates) -> candidates` that adds the five dimension scores plus `competitive_score` to each dict.  On failure (or when not provided) the module falls back to heuristic regex-based scoring.
+
+Dimension weights:
+
+| Dimension | Weight |
+|-----------|--------|
+| `scroll_stop_probability` | 30% |
+| `share_trigger` | 20% |
+| `clarity` | 20% |
+| `debate_potential` | 15% |
+| `ending_strength` | 15% |
+
+Returns the top-3 candidates sorted by `competitive_score` descending.
+
+### Pipeline Integration
+
+The engine is enabled by default via `use_reconstruction_engine: true` (default) in `config/model.yaml`.  Set to `false` to revert to the legacy contiguous window extraction.
+
+Engine-specific settings live under a dedicated `reconstruction` key in config:
+
+```yaml
+model:
+  use_reconstruction_engine: true  # default
+
+reconstruction:
+  min_duration: 20.0
+  max_duration: 60.0
+  coherence_threshold: 0.25
+  target_min_candidates: 20
+  target_max_candidates: 50
+  reorder_k: 5                # top-k units per role in reordering
+  default_speaker: speaker_0  # fallback when transcript has no speaker labels
+```
+
+### Output Format
+
+Each reconstructed clip is a dict compatible with the existing downstream clipper, metadata generator, and scheduler:
+
+```python
+{
+    "start": 12.5,          # seconds
+    "end": 48.3,            # seconds
+    "duration": 35.8,
+    "text": "...",
+    "pattern": "hook_context_punchline",
+    "pattern_score": 7.42,
+    "unit_indices": [2, 5, 9],
+    "is_contiguous": False,
+    "competitive_score": 6.8,
+    "scroll_stop_probability": 7.5,
+    "share_trigger": 6.0,
+    "debate_potential": 5.0,
+    "clarity": 8.0,
+    "ending_strength": 6.5,
+    "constraint_score": 3.94,
+    "hook_score_first": 8.0,
+    "impact_score_last": 7.2,
+    "coherence": 0.62,
+}
+```
+
+---
+
+**Version**: 3.0
+**Last Updated**: 2026-02-23
