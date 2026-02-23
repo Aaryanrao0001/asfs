@@ -85,9 +85,9 @@ def reconstruct_clips(
     constrained = apply_clip_constraints(
         raw_candidates,
         scored_units,
-        min_duration=cfg.get("min_duration", 20.0),
+        min_duration=cfg.get("min_duration", 15.0),
         max_duration=cfg.get("max_duration", 60.0),
-        coherence_threshold=cfg.get("coherence_threshold", 0.25),
+        coherence_threshold=cfg.get("coherence_threshold", 0.15),
         target_min=cfg.get("target_min_candidates", 20),
         target_max=cfg.get("target_max_candidates", 50),
     )

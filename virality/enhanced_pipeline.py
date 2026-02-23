@@ -149,13 +149,13 @@ class EnhancedViralPipeline:
         """
         logger.info(f"Stage 2: Deep analysis of {len(candidates)} candidates")
         
-        # Step 1: Psychological scoring
+        # Step 1: Psychological scoring (weighted component – no hard gate)
         logger.info("Applying psychological virality model...")
-        psych_scored = self.psychological_scorer.score_and_filter_clips(candidates)
-        
+        psych_scored = self.psychological_scorer.score_all_clips(candidates)
+
         logger.info(
-            f"Psychological filter: {len(psych_scored)}/{len(candidates)} "
-            f"passed threshold"
+            f"Psychological scoring: {len(psych_scored)} clips scored "
+            f"(psychological score used as weighted component)"
         )
         
         # Step 2: LLM scoring (if available and enabled)
@@ -167,12 +167,29 @@ class EnhancedViralPipeline:
             except Exception as e:
                 logger.error(f"LLM scoring failed: {e}")
                 logger.info("Continuing with psychological scores only")
-        
+
+        # Step 2b: Compute composite final score
+        # final_score = llm_score * 0.6 + psychological_score * 0.25 + coherence * 0.15
+        # All inputs normalized to 0–100.
+        for clip in llm_scored:
+            # Capture the LLM-produced score before overwriting final_score
+            llm_score = clip.get('llm_score', clip.get('overall_score', clip.get('final_score', 0)))
+            clip['llm_score'] = llm_score  # preserve for transparency
+            psych_score = clip.get('psychological_score', 0)
+            # coherence is 0–1; scale to 0–100
+            coherence_val = clip.get('coherence', clip.get('coherence_score', 0)) * 100
+            composite = (
+                llm_score * 0.60
+                + psych_score * 0.25
+                + coherence_val * 0.15
+            )
+            clip['final_score'] = round(composite, 2)
+
         # Step 3: Semantic deduplication
         logger.info("Semantic deduplication...")
         deduplicated = self.semantic_dedup.deduplicate_clips(
             llm_scored,
-            score_key='psychological_score'
+            score_key='final_score'
         )
         
         # Step 4: Generate metadata for top clips
@@ -181,14 +198,8 @@ class EnhancedViralPipeline:
             metadata = self.metadata_generator.generate_all_metadata(clip)
             clip['viral_metadata'] = metadata
         
-        # Sort by final score (psychological or LLM if available)
-        if 'final_score' in deduplicated[0] if deduplicated else {}:
-            deduplicated.sort(key=lambda x: x.get('final_score', 0), reverse=True)
-        else:
-            deduplicated.sort(
-                key=lambda x: x.get('psychological_score', 0),
-                reverse=True
-            )
+        # Sort by composite final score
+        deduplicated.sort(key=lambda x: x.get('final_score', 0), reverse=True)
         
         logger.info(f"Stage 2 complete: {len(deduplicated)} final candidates")
         

@@ -15,7 +15,9 @@ model:
   
   # Scoring configuration
   max_segments_to_score: 50
-  min_score_threshold: 60.0
+  # Rank-based selection: take top_k clips; absolute_min_score is the sanity floor
+  top_k: 10
+  absolute_min_score: 30
   
   # Rate limiting and batching
   batch_size: 6  # Segments per API call
@@ -31,7 +33,9 @@ model:
   use_enhanced_pipeline: true
   
   # Psychological Virality Scoring
-  psychological_threshold: 65.0  # Minimum score (0-100) for clips to pass
+  # NOTE: threshold is no longer a hard gate; psychological_score is used as a
+  # weighted component (25%) in the composite final_score.
+  psychological_threshold: 65.0  # kept for reference / logging only
   top_clips: 10  # Number of top clips to return after full analysis
   
   # Hook Quality (First 7 Seconds)

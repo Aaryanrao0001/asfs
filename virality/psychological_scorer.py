@@ -193,6 +193,31 @@ class PsychologicalScorer:
             'weaknesses': weaknesses
         }
     
+    def score_all_clips(self, clips: List[Dict]) -> List[Dict]:
+        """
+        Score all clips and attach psychological scores without filtering.
+
+        Unlike ``score_and_filter_clips``, every clip is returned regardless
+        of its score.  The psychological score is intended to be used as a
+        weighted component of a composite final score rather than a hard gate.
+
+        Args:
+            clips: List of clip candidates
+
+        Returns:
+            All clips enriched with psychological scores (no clips removed)
+        """
+        for clip in clips:
+            psych_analysis = self.score_clip(clip)
+            clip['psychological_analysis'] = psych_analysis
+            clip['psychological_score'] = psych_analysis['psychological_score']
+
+        logger.info(
+            f"Psychological scoring: scored {len(clips)} clips "
+            f"(no threshold gate applied)"
+        )
+        return clips
+
     def score_and_filter_clips(self, clips: List[Dict]) -> List[Dict]:
         """
         Score clips and filter by threshold.
