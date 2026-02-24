@@ -43,8 +43,13 @@ DEFAULT_MIN_DURATION_SEC = 10.0
 # Key used to read each micro-segment's score.
 DEFAULT_SCORE_KEY = "composite_score"
 
-# Float tolerance for adjacency check (allows minor rounding differences).
-_ADJACENCY_TOL = 0.05
+# Maximum gap in seconds between two adjacent segments that are still
+# considered continuous (used in adjacency check).  Exposed as a public
+# constant so callers can reference the default without hard-coding it.
+DEFAULT_GAP_SEC = 0.05
+
+# Internal alias kept for readability; callers should use DEFAULT_GAP_SEC.
+_ADJACENCY_TOL = DEFAULT_GAP_SEC
 
 
 def merge(
@@ -55,6 +60,7 @@ def merge(
     allow_one_weak: bool = ALLOW_ONE_WEAK,
     min_duration_sec: float = DEFAULT_MIN_DURATION_SEC,
     max_duration_sec: float = DEFAULT_MAX_DURATION_SEC,
+    gap_sec: float = DEFAULT_GAP_SEC,
 ) -> List[Dict]:
     """
     Merge adjacent micro-segments into macro candidates.
@@ -74,7 +80,12 @@ def merge(
     min_duration_sec : float
         Discard macro candidates shorter than this.
     max_duration_sec : float
-        Hard cap — stop growing a cluster before exceeding this duration.
+        Hard cap that stops growing a cluster before exceeding this duration.
+        Additionally, any completed macro candidates whose total duration
+        exceeds this limit are discarded.
+    gap_sec : float
+        Maximum gap in seconds between two segments that are still considered
+        adjacent and eligible for merging.  Defaults to :data:`DEFAULT_GAP_SEC`.
 
     Returns
     -------
@@ -112,8 +123,8 @@ def merge(
             if nxt["end"] - cluster_start > max_duration_sec:
                 break
 
-            # Adjacency: next segment must start no later than prev end + tolerance.
-            if nxt["start"] > prev["end"] + _ADJACENCY_TOL:
+            # Adjacency: next segment must start no later than prev end + gap_sec.
+            if nxt["start"] > prev["end"] + gap_sec:
                 break
 
             score_j = nxt.get(score_key, 0.0)
@@ -130,7 +141,7 @@ def merge(
                 and j + 1 < n
                 and sorted_segs[j + 1].get(score_key, 0.0) >= strong_threshold
                 and sorted_segs[j + 1]["end"] - cluster_start <= max_duration_sec
-                and sorted_segs[j + 1]["start"] <= nxt["end"] + _ADJACENCY_TOL
+                and sorted_segs[j + 1]["start"] <= nxt["end"] + gap_sec
             ):
                 # Momentum smoothing: one weak segment between two strong ones.
                 cluster.append(nxt)
@@ -154,6 +165,15 @@ def merge(
                 idx,
                 duration,
                 min_duration_sec,
+            )
+            continue
+
+        if duration > max_duration_sec:
+            logger.debug(
+                "ClusterMerger: cluster %d too long (%.1f s > %.1f s) — dropped.",
+                idx,
+                duration,
+                max_duration_sec,
             )
             continue
 
