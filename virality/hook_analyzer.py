@@ -14,6 +14,11 @@ from typing import Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Minimum hook score (0–10) required for a clip to pass hook quality filtering.
+# Lowered to 3.5 to avoid filtering out all candidates when content lacks
+# strong viral hooks; raise back toward 6.0 once content quality improves.
+DEFAULT_MIN_HOOK_SCORE: float = 3.5
+
 
 # Death signals (auto-fail patterns)
 DEATH_SIGNALS = [
@@ -203,7 +208,7 @@ class HookAnalyzer:
         self,
         candidates: List[Dict],
         transcript_segments: List[Dict],
-        min_hook_score: float = 6.0
+        min_hook_score: float = DEFAULT_MIN_HOOK_SCORE
     ) -> List[Dict]:
         """
         Filter clip candidates by hook quality.

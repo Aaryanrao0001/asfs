@@ -35,8 +35,10 @@ _DIMENSION_WEIGHTS: Dict[str, float] = {
     "ending_strength":         0.15,
 }
 
-# Top-N candidates to keep after competitive evaluation
-TOP_N_KEEP: int = 3
+# Top-N candidates to keep after competitive evaluation.
+# Set to 15 to ensure enough candidates survive for downstream filtering
+# (hook filter and time-diversity constraints).  Adjust as needed.
+TOP_N_KEEP: int = 15
 
 
 # ── heuristic fallback ─────────────────────────────────────────────────────
