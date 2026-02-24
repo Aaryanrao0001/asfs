@@ -3,18 +3,34 @@ Auto-scheduler service for background video uploads.
 
 Manages scheduled uploads with configurable time gaps between uploads.
 Runs as a background service and uploads videos from the registry.
+
+When a Playwright page object is supplied via ``set_page``, the scheduler
+performs adaptive scheduling: it scrapes the latest post's view count from
+TikTok Studio after each upload and adjusts the next gap accordingly.
+
+Adaptive rules (mirroring the PR spec):
+  views >= 1000  →  1 hour  (momentum – post again quickly)
+  views <= 300   →  12 hours (low engagement – back off)
+  otherwise      →  4 hours  (default mid-range)
 """
 
+import asyncio
 import logging
 import time
 import threading
 from datetime import datetime, timedelta
 from typing import Optional, Callable
-from pathlib import Path
 
 from database import VideoRegistry
 
 logger = logging.getLogger(__name__)
+
+# Adaptive scheduling thresholds
+_HIGH_VIEWS_THRESHOLD = 1000
+_LOW_VIEWS_THRESHOLD = 300
+_HIGH_VIEWS_GAP_HOURS = 1
+_MID_VIEWS_GAP_HOURS = 4
+_LOW_VIEWS_GAP_HOURS = 12
 
 
 class UploadScheduler:
@@ -44,6 +60,9 @@ class UploadScheduler:
         
         # Last upload timestamp
         self.last_upload_time: Optional[datetime] = None
+
+        # Optional Playwright page used for adaptive scheduling
+        self._page = None
     
     def configure(
         self,
@@ -77,7 +96,67 @@ class UploadScheduler:
             callback: Function with signature: callback(video_id, platform, metadata) -> bool
         """
         self.upload_callback = callback
-    
+
+    def set_page(self, page) -> None:
+        """
+        Provide a Playwright ``Page`` instance for adaptive scheduling.
+
+        When a page is set the scheduler will scrape TikTok Studio after
+        each TikTok upload and call :meth:`schedule_next_upload` to adjust
+        the gap dynamically.  If the scrape fails the current gap is kept
+        so the uploader is never blocked.
+
+        Args:
+            page: An authenticated async Playwright ``Page`` object.
+        """
+        self._page = page
+
+    def schedule_next_upload(self, delay_hours: int) -> None:
+        """
+        Override the next upload gap with *delay_hours*.
+
+        Args:
+            delay_hours: Number of hours to wait before the next upload.
+        """
+        self.upload_gap_seconds = delay_hours * 3600
+        logger.info("Adaptive schedule: next upload in %d hour(s)", delay_hours)
+
+    def _apply_adaptive_schedule(self) -> None:
+        """
+        Scrape TikTok Studio and adjust the upload gap based on view count.
+
+        Falls back to the current gap if scraping fails.  Designed to be
+        called from the scheduler loop after a successful TikTok upload.
+        """
+        if self._page is None:
+            return
+
+        try:
+            from uploaders.tiktok_studio_scraper import get_latest_video_views
+
+            # Run the async scraper in a new event loop from this sync thread
+            views = asyncio.run(get_latest_video_views(self._page))
+
+            if views is None:
+                logger.warning(
+                    "Adaptive scheduling: could not retrieve views – keeping current gap"
+                )
+                return
+
+            logger.info("Adaptive scheduling: latest post views = %d", views)
+
+            if views >= _HIGH_VIEWS_THRESHOLD:
+                self.schedule_next_upload(delay_hours=_HIGH_VIEWS_GAP_HOURS)
+            elif views <= _LOW_VIEWS_THRESHOLD:
+                self.schedule_next_upload(delay_hours=_LOW_VIEWS_GAP_HOURS)
+            else:
+                self.schedule_next_upload(delay_hours=_MID_VIEWS_GAP_HOURS)
+
+        except Exception as exc:
+            logger.error(
+                "Adaptive scheduling error (falling back to current gap): %s", exc
+            )
+
     def start(self):
         """Start the scheduler in a background thread."""
         if self.running:
@@ -137,6 +216,9 @@ class UploadScheduler:
                             if success:
                                 logger.info(f"Scheduled upload successful: {video_id} to {platform}")
                                 self.last_upload_time = datetime.now()
+                                # Adaptive scheduling: adjust gap based on TikTok views
+                                if platform == "TikTok":
+                                    self._apply_adaptive_schedule()
                             else:
                                 logger.warning(f"Scheduled upload failed: {video_id} to {platform}")
                         except Exception as e:
