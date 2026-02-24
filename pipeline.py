@@ -55,7 +55,7 @@ from transcript.fallback import (
     load_transcript_if_exists,
     transcribe_first_30_seconds,
 )
-from segmenter import build_sentence_windows, build_pause_windows
+from segmenter import build_sentence_windows, build_pause_windows, build_sliding_windows
 from virality.reconstruction_engine import reconstruct_clips
 from ai import score_segments, score_segments_enhanced
 from validator import deduplicate_clips, remove_overlapping_clips
@@ -275,16 +275,21 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
         # Check if this stage is cached OR if transcript.json already exists
         if cache.has_completed_stage(pipeline_state, 'transcription'):
             cached_transcript_path = cache.get_stage_result(pipeline_state, 'transcription', 'transcript_path')
-            logger.info(f"[OK] SKIPPED (using cached result): {cached_transcript_path}")
             
-            # Verify file still exists
+            # Verify file still exists and is valid
             if not os.path.exists(cached_transcript_path):
                 logger.warning("Cached transcript file not found, re-transcribing...")
                 cache_hit = False
             else:
-                transcript_path = cached_transcript_path
-                transcript_data = load_transcript(transcript_path)
-                cache_hit = True
+                is_valid, transcript_data = load_and_validate_transcript(cached_transcript_path)
+                if is_valid:
+                    logger.info(f"[OK] SKIPPED (using cached result): {cached_transcript_path}")
+                    logger.info(f"[OK] Cached transcript has {len(transcript_data['segments'])} segments")
+                    transcript_path = cached_transcript_path
+                    cache_hit = True
+                else:
+                    logger.warning("Cached transcript invalid or corrupt, re-transcribing...")
+                    cache_hit = False
         elif use_cache and os.path.exists(transcript_path):
             # Transcript exists but not in cache - load and validate it
             is_valid, transcript_data = load_and_validate_transcript(transcript_path)
@@ -401,7 +406,10 @@ def run_pipeline(video_path: str, output_dir: str = "output", use_cache: bool = 
                     pause_candidates = build_pause_windows(transcript_data)
                     logger.info(f"[OK] Pause-based candidates: {len(pause_candidates)}")
                     
-                    all_candidates = sentence_candidates + pause_candidates
+                    sliding_candidates = build_sliding_windows(transcript_data, min_duration=20, max_duration=55, step_seconds=3)
+                    logger.info(f"[OK] Sliding-window candidates: {len(sliding_candidates)}")
+                    
+                    all_candidates = sentence_candidates + pause_candidates + sliding_candidates
                     logger.info(f"[OK] Total candidates: {len(all_candidates)}")
                 
                 audit.log_pipeline_event("segmentation", "completed", video_path,
