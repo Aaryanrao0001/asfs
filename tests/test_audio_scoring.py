@@ -618,6 +618,326 @@ class TestAudioScoringMigration(unittest.TestCase):
         conn.close()
 
 
+# ── Open Loop Detector ────────────────────────────────────────────────────────
+
+from src.segmentation.open_loop_detector import (
+    has_open_loop,
+    next_segment_continues,
+    close_open_loops,
+)
+
+
+def _seg(seg_id: int, text: str, start: float = 0.0, end: float = 5.0) -> dict:
+    return {
+        "segment_id": seg_id,
+        "text": text,
+        "start": start,
+        "end": end,
+        "duration": round(end - start, 4),
+    }
+
+
+class TestHasOpenLoop(unittest.TestCase):
+
+    def test_trailing_and_is_open_loop(self):
+        self.assertTrue(has_open_loop("I was really excited and"))
+
+    def test_trailing_but_is_open_loop(self):
+        self.assertTrue(has_open_loop("I tried everything but"))
+
+    def test_trailing_because_is_open_loop(self):
+        self.assertTrue(has_open_loop("This matters because"))
+
+    def test_setup_phrase_i_was_about_to(self):
+        # The phrase "I was about to" is the trigger; additional words after it
+        # represent what would follow in a real transcript segment.
+        self.assertTrue(has_open_loop("I was about to hit the record"))
+
+    def test_setup_phrase_the_thing_is(self):
+        self.assertTrue(has_open_loop("The thing is"))
+
+    def test_setup_phrase_heres_what_happened(self):
+        self.assertTrue(has_open_loop("Here's what happened"))
+
+    def test_unanswered_question(self):
+        self.assertTrue(has_open_loop("You know what the real problem is?"))
+
+    def test_incomplete_list_first(self):
+        self.assertTrue(has_open_loop("First of all"))
+
+    def test_incomplete_list_number_one(self):
+        self.assertTrue(has_open_loop("Number one"))
+
+    def test_complete_sentence_is_not_open_loop(self):
+        self.assertFalse(has_open_loop("That was the whole story."))
+
+    def test_empty_string_is_not_open_loop(self):
+        self.assertFalse(has_open_loop(""))
+
+    def test_exclamation_sentence_is_not_open_loop(self):
+        self.assertFalse(has_open_loop("That was incredible!"))
+
+
+class TestNextSegmentContinues(unittest.TestCase):
+
+    def test_starts_with_and(self):
+        self.assertTrue(next_segment_continues("and it turned out to be true"))
+
+    def test_starts_with_but(self):
+        self.assertTrue(next_segment_continues("but then everything changed"))
+
+    def test_starts_with_so(self):
+        self.assertTrue(next_segment_continues("so I decided to leave"))
+
+    def test_starts_with_because(self):
+        self.assertTrue(next_segment_continues("because nobody was watching"))
+
+    def test_starts_with_however(self):
+        self.assertTrue(next_segment_continues("however the outcome was different"))
+
+    def test_normal_start_is_not_continuation(self):
+        self.assertFalse(next_segment_continues("The results were surprising."))
+
+    def test_empty_string_is_not_continuation(self):
+        self.assertFalse(next_segment_continues(""))
+
+    def test_name_starting_with_and_not_flagged(self):
+        # The \b word-boundary after the alternation ensures "Anderson" does NOT
+        # match: after matching "And" the next character is "e" (word char),
+        # so \b fails and the regex correctly rejects it.
+        self.assertFalse(next_segment_continues("Anderson was first to arrive."))
+
+
+class TestCloseOpenLoops(unittest.TestCase):
+
+    def test_empty_input_returns_empty(self):
+        self.assertEqual(close_open_loops([]), [])
+
+    def test_complete_segment_not_merged(self):
+        segs = [
+            _seg(1, "That was the whole story.", 0.0, 5.0),
+            _seg(2, "Now let me explain.", 5.0, 10.0),
+        ]
+        result = close_open_loops(segs)
+        self.assertEqual(len(result), 2)
+
+    def test_open_loop_segment_merged_with_next(self):
+        segs = [
+            _seg(1, "I was about to hit the record", 0.0, 5.0),
+            _seg(2, "and it changed everything.", 5.0, 10.0),
+        ]
+        result = close_open_loops(segs)
+        self.assertEqual(len(result), 1)
+        self.assertIn("I was about to hit the record", result[0]["text"])
+        self.assertIn("and it changed everything.", result[0]["text"])
+
+    def test_continuation_starter_triggers_merge(self):
+        segs = [
+            _seg(1, "The results were surprising.", 0.0, 5.0),
+            _seg(2, "but we had to push forward.", 5.0, 10.0),
+        ]
+        result = close_open_loops(segs)
+        self.assertEqual(len(result), 1)
+
+    def test_merged_segment_spans_full_time_range(self):
+        segs = [
+            _seg(1, "I was about to give up", 0.0, 5.0),
+            _seg(2, "when the answer appeared.", 5.0, 10.0),
+        ]
+        result = close_open_loops(segs)
+        self.assertAlmostEqual(result[0]["start"], 0.0)
+        self.assertAlmostEqual(result[0]["end"], 10.0)
+        self.assertAlmostEqual(result[0]["duration"], 10.0)
+
+    def test_trailing_and_merges_forward(self):
+        segs = [
+            _seg(1, "I tried really hard and", 0.0, 5.0),
+            _seg(2, "it finally worked out.", 5.0, 10.0),
+        ]
+        result = close_open_loops(segs)
+        self.assertEqual(len(result), 1)
+
+    def test_chain_of_open_loops_fully_merged(self):
+        segs = [
+            _seg(1, "First of all", 0.0, 3.0),
+            _seg(2, "you need to know that", 3.0, 6.0),
+            _seg(3, "this really works.", 6.0, 10.0),
+        ]
+        result = close_open_loops(segs)
+        self.assertEqual(len(result), 1)
+        self.assertAlmostEqual(result[0]["start"], 0.0)
+        self.assertAlmostEqual(result[0]["end"], 10.0)
+
+    def test_word_lists_concatenated_on_merge(self):
+        segs = [
+            {
+                "segment_id": 1,
+                "text": "I was about to quit",
+                "start": 0.0,
+                "end": 4.0,
+                "duration": 4.0,
+                "words": [{"word": "I", "start": 0.0, "end": 0.3}],
+            },
+            {
+                "segment_id": 2,
+                "text": "but something stopped me.",
+                "start": 4.0,
+                "end": 8.0,
+                "duration": 4.0,
+                "words": [{"word": "but", "start": 4.0, "end": 4.3}],
+            },
+        ]
+        result = close_open_loops(segs)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result[0]["words"]), 2)
+
+    def test_last_segment_with_open_loop_kept_as_is(self):
+        # When there is no next segment to merge into, just keep it.
+        segs = [_seg(1, "I was about to", 0.0, 5.0)]
+        result = close_open_loops(segs)
+        self.assertEqual(len(result), 1)
+
+
+# ── Boundary Snapper ──────────────────────────────────────────────────────────
+
+from src.segmentation.boundary_snapper import (
+    snap_to_sentence_start,
+    snap_to_sentence_end,
+    snap_segment,
+)
+
+
+def _words_from_sentences(sentences):
+    """Build a synthetic word list from a list of sentence strings."""
+    words = []
+    t = 0.0
+    for sentence in sentences:
+        for token in sentence.split():
+            word_dur = 0.4
+            words.append({"word": token, "start": round(t, 3), "end": round(t + word_dur, 3)})
+            t += word_dur
+        # Small pause between sentences.
+        t += 0.1
+    return words
+
+
+class TestSnapToSentenceStart(unittest.TestCase):
+
+    def test_empty_words_returns_target(self):
+        self.assertEqual(snap_to_sentence_start([], 5.0), 5.0)
+
+    def test_first_word_returns_its_start(self):
+        words = _words_from_sentences(["Hello world."])
+        result = snap_to_sentence_start(words, words[0]["start"])
+        self.assertAlmostEqual(result, words[0]["start"])
+
+    def test_snaps_back_to_sentence_boundary(self):
+        # Two sentences: "This is great." "Start here now."
+        words = _words_from_sentences(["This is great.", "Start here now."])
+        # Target is somewhere in the middle of the second sentence.
+        second_sentence_second_word = words[5]  # "here"
+        result = snap_to_sentence_start(words, second_sentence_second_word["start"])
+        # Should snap back to "Start", the first word of the second sentence.
+        self.assertLessEqual(result, second_sentence_second_word["start"])
+
+    def test_continuation_word_skipped(self):
+        # Sentence ends; next sentence begins with "And".
+        words = _words_from_sentences(["It happened fast.", "And then it changed."])
+        # Find "And" — it's the first word of the second sentence.
+        and_word = next(w for w in words if w["word"].lower() == "and")
+        result = snap_to_sentence_start(words, and_word["start"])
+        # Should skip past "And" to "then".
+        then_word = next(w for w in words if w["word"].lower() == "then")
+        self.assertAlmostEqual(result, then_word["start"])
+
+    def test_returns_float(self):
+        words = _words_from_sentences(["Hello."])
+        result = snap_to_sentence_start(words, 0.0)
+        self.assertIsInstance(result, float)
+
+
+class TestSnapToSentenceEnd(unittest.TestCase):
+
+    def test_empty_words_returns_target(self):
+        self.assertEqual(snap_to_sentence_end([], 5.0), 5.0)
+
+    def test_within_sentence_extends_to_period(self):
+        words = _words_from_sentences(["The result was incredible."])
+        # Target in the middle of the sentence.
+        middle_word = words[1]  # "result"
+        result = snap_to_sentence_end(words, middle_word["start"])
+        # Should extend to the end of "incredible." (last word).
+        self.assertGreaterEqual(result, middle_word["end"])
+        self.assertAlmostEqual(result, words[-1]["end"])
+
+    def test_at_end_of_sentence_stays(self):
+        words = _words_from_sentences(["Short sentence."])
+        last_word_end = words[-1]["end"]
+        result = snap_to_sentence_end(words, last_word_end - 0.01)
+        self.assertAlmostEqual(result, last_word_end)
+
+    def test_no_punctuation_returns_last_word_end(self):
+        # Words with no sentence-ending punctuation.
+        words = [
+            {"word": "hello", "start": 0.0, "end": 0.4},
+            {"word": "world", "start": 0.5, "end": 0.9},
+        ]
+        result = snap_to_sentence_end(words, 0.0)
+        self.assertAlmostEqual(result, 0.9)
+
+    def test_returns_float(self):
+        words = _words_from_sentences(["Done."])
+        result = snap_to_sentence_end(words, 0.0)
+        self.assertIsInstance(result, float)
+
+
+class TestSnapSegment(unittest.TestCase):
+
+    def test_empty_words_returns_copy_of_segment(self):
+        seg = {"start": 1.0, "end": 5.0, "duration": 4.0, "text": "hello"}
+        result = snap_segment(seg, [])
+        self.assertEqual(result["start"], 1.0)
+        self.assertEqual(result["end"], 5.0)
+
+    def test_snapped_segment_has_required_keys(self):
+        words = _words_from_sentences(["This is a test sentence."])
+        seg = {"start": 0.0, "end": words[-1]["end"], "duration": words[-1]["end"], "text": ""}
+        result = snap_segment(seg, words)
+        for key in ("start", "end", "duration", "words", "text"):
+            self.assertIn(key, result)
+
+    def test_start_never_after_original_start(self):
+        words = _words_from_sentences(["The quick brown fox jumped."])
+        seg = {"start": words[2]["start"], "end": words[-1]["end"], "duration": 2.0, "text": ""}
+        result = snap_segment(seg, words)
+        self.assertLessEqual(result["start"], words[2]["start"])
+
+    def test_end_never_before_original_end(self):
+        words = _words_from_sentences(["The quick brown fox jumped."])
+        seg = {
+            "start": words[0]["start"],
+            "end": words[2]["end"],
+            "duration": words[2]["end"],
+            "text": "",
+        }
+        result = snap_segment(seg, words)
+        self.assertGreaterEqual(result["end"], words[2]["end"])
+
+    def test_duration_matches_start_end(self):
+        words = _words_from_sentences(["A complete sentence.", "Another one here."])
+        seg = {"start": words[0]["start"], "end": words[-1]["end"], "duration": 0.0, "text": ""}
+        result = snap_segment(seg, words)
+        expected_dur = round(result["end"] - result["start"], 4)
+        self.assertAlmostEqual(result["duration"], expected_dur, places=3)
+
+    def test_original_segment_not_mutated(self):
+        words = _words_from_sentences(["Hello world."])
+        seg = {"start": 0.0, "end": 1.0, "duration": 1.0, "text": "hello world"}
+        snap_segment(seg, words)
+        self.assertEqual(seg["start"], 0.0)
+        self.assertEqual(seg["text"], "hello world")
+
+
 if __name__ == "__main__":
     success = unittest.main(verbosity=2, exit=False).result.wasSuccessful()
     sys.exit(0 if success else 1)
