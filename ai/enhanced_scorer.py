@@ -8,6 +8,7 @@ import logging
 from typing import Dict, List
 
 from virality import EnhancedViralPipeline
+from virality.hook_analyzer import DEFAULT_MIN_HOOK_SCORE
 from .scorer import score_segments as original_score_segments
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ def score_segments_enhanced(
     enhanced_config = {
         'psychological_threshold': model_config.get('psychological_threshold', 65.0),
         'similarity_threshold': model_config.get('similarity_threshold', 0.85),
-        'min_hook_score': model_config.get('min_hook_score', 6.0),
+        'min_hook_score': model_config.get('min_hook_score', DEFAULT_MIN_HOOK_SCORE),
         'use_llm_scoring': model_config.get('use_llm_scoring', True)
     }
     
@@ -76,6 +77,16 @@ def score_segments_enhanced(
         llm_scorer_func=llm_scorer,
         top_n=top_n
     )
+
+    if not enhanced_results:
+        logger.warning(
+            "ENHANCED PIPELINE PRODUCED ZERO CLIPS — "
+            "CHECK HOOK THRESHOLD AND CANDIDATE GENERATION."
+        )
+        logger.info(
+            "Falling back to original scoring pipeline due to zero enhanced results."
+        )
+        return original_score_segments(candidates, model_config, max_segments)
     
     # If we got fewer results than expected, pad with original scoring
     if len(enhanced_results) < max_segments and len(candidates) > len(enhanced_results):

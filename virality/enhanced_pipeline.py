@@ -11,7 +11,7 @@ from typing import Dict, List
 
 from .emotion_analyzer import EmotionAnalyzer
 from .transcript_scorer import TranscriptScorer
-from .hook_analyzer import HookAnalyzer
+from .hook_analyzer import HookAnalyzer, DEFAULT_MIN_HOOK_SCORE
 from .narrative_detector import NarrativeArcDetector
 from .psychological_scorer import PsychologicalScorer
 from .metadata_generator import ViralMetadataGenerator
@@ -98,7 +98,7 @@ class EnhancedViralPipeline:
         
         # Step 2: Hook quality filter (first 7 seconds)
         logger.info("Analyzing hook quality...")
-        min_hook_score = self.config.get('min_hook_score', 6.0)
+        min_hook_score = self.config.get('min_hook_score', DEFAULT_MIN_HOOK_SCORE)
         hook_filtered = self.hook_analyzer.filter_by_hook_quality(
             emotion_filtered,
             self.transcript_segments,

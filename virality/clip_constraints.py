@@ -28,8 +28,17 @@ HOOK_TOP_FRACTION: float = 0.20
 # Minimum coherence score (0–1) to accept a candidate
 DEFAULT_COHERENCE_THRESHOLD: float = 0.15
 
-# Time-diversity bin width: only one candidate is kept per this many seconds
-TIME_DIVERSITY_BIN_SECONDS: float = 60.0
+# Time-diversity bin width: only one candidate is kept per this many seconds.
+# 120 s gives ~17 bins for a 34-minute video, which lets the output span the
+# full episode without over-collapsing to a single start region.
+# Rule of thumb: bins  = ceil(total_duration / TIME_DIVERSITY_BIN_SECONDS)
+# Minimum recommended bins for adequate diversity: ~8 for a 30-min episode.
+TIME_DIVERSITY_BIN_SECONDS: float = 120.0
+
+# Minimum number of distinct time bins that must be represented in the output
+# before we emit a warning.  Scaled to the clip window; 8 bins × 120 s = 960 s
+# covers a 16-minute span, which is a reasonable minimum for a 30+ min video.
+TIME_DIVERSITY_MIN_BINS: int = 8
 
 # Composite constraint_score weights
 # hook_score and impact_score are 0–10; scale factor brings them to ~0–0.25
@@ -192,9 +201,16 @@ def apply_clip_constraints(
     if len(diverse) > target_max:
         diverse = diverse[:target_max]
 
+    n_bins = len(bin_seen)
     logger.info(
         f"apply_clip_constraints: {len(diverse)} candidates pass "
         f"(duration {min_duration}–{max_duration}s, coherence≥{coherence_threshold}, "
-        f"time-diverse bins={len(bin_seen)})"
+        f"time-diverse bins={n_bins})"
     )
+    if n_bins < TIME_DIVERSITY_MIN_BINS:
+        logger.warning(
+            f"apply_clip_constraints: only {n_bins} distinct time bins covered "
+            f"(minimum recommended: {TIME_DIVERSITY_MIN_BINS}). "
+            f"Consider lowering hook/coherence thresholds or increasing input candidates."
+        )
     return diverse
